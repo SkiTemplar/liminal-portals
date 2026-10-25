@@ -56,12 +56,17 @@ function Invoke-GameRun([string]$Map, [string[]]$Commands, [string]$LogName, [st
     Write-Host "== $LogName ($exec)"
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $proc = Start-Process -FilePath $Editor -ArgumentList $cmdArgs -PassThru
+    # Sin leer Handle antes de que salga, ExitCode queda vacío en Windows PowerShell.
+    $null = $proc.Handle
     if (-not $proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
         # Solo el proceso lanzado aquí (por PID), nunca por nombre de imagen.
         Stop-Process -Id $proc.Id -Force
         throw "$LogName no terminó en $TimeoutMinutes minutos (log: $logPath)"
     }
+    $proc.WaitForExit()
     Write-Host ("   {0:N0} s, código {1}" -f $sw.Elapsed.TotalSeconds, $proc.ExitCode)
+    # Un juego que se cae o no puede lanzar la orden (Liminal.* sale con 2) no da por buenos informes viejos.
+    if ($proc.ExitCode -ne 0) { throw "$LogName salió con código $($proc.ExitCode) (log: $logPath)" }
     return $logPath
 }
 
@@ -139,6 +144,8 @@ function Invoke-SelfTestNegative([string[]]$ExtraCommands) {
 
 function Invoke-Tour([string[]]$ExtraCommands) {
     $tourDir = Join-Path $ProjectRoot 'Saved\Tour'
+    # Si el juego no llega a lanzar Liminal.Tour, no se comprueba el recorrido de una ejecución anterior.
+    if (Test-Path $tourDir) { Remove-Item $tourDir -Recurse -Force }
     $logPath = Invoke-GameRun $HubMap ($ExtraCommands + @('Liminal.Tour')) 'Tour'
     $index = Join-Path $tourDir 'tour.json'
     if (-not (Test-Path $index)) { throw "Liminal.Tour no escribió $index (log: $logPath)" }
@@ -238,6 +245,8 @@ function Invoke-Bench([string[]]$ExtraCommands) {
         $first.gpuMsPaired, $second.gpuMsPaired, $diffPaired, $first.gpuMsSlope, $second.gpuMsSlope, $diffSlope, $verdict)
 }
 
+if ($ClipPlaneCheck -and -not $Calibrate) { throw '-ClipPlaneCheck solo vale con -Calibrate.' }
+if ($SelfTestNegative -and -not $SelfTest) { throw '-SelfTestNegative solo vale con -SelfTest.' }
 if (-not ($Calibrate -or $SelfTest -or $Tour -or $Bench)) {
     Write-Output 'Nada que verificar: usa -Calibrate, -SelfTest, -Tour o -Bench.'
     exit 0

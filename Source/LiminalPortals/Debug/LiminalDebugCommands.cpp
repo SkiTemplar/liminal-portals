@@ -7,6 +7,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/App.h"
 #include "LiminalPortals.h"
 #include "Misc/Paths.h"
 
@@ -54,13 +56,40 @@ namespace
 		return nullptr;
 	}
 
+	/** Código de salida del juego cuando una orden Liminal.* no puede empezar. */
+	constexpr uint8 StartFailureExitCode = 2;
+
+	/**
+	 * Registra el error de arranque de una orden y, en un juego desatendido (-unattended, como lo lanza
+	 * verify.ps1), lo cierra con un código distinto de 0: solo Finish() de cada ejecución pide salir, y
+	 * sin esto verify.ps1 esperaría a su tiempo máximo con el juego parado en el mapa. Si ya hay una
+	 * ejecución en curso no se cierra: la que está en marcha terminará y saldrá sola.
+	 * La salida es forzada (vacía el log y termina el proceso) porque en UE 5.6 la salida ordenada
+	 * descarta el código: GuardedMain devuelve 0 aunque se pida otro con RequestExitWithStatus.
+	 */
+	void FailCommandStart(const TCHAR* Command, const FString& Error, bool bRunInProgress)
+	{
+		UE_LOG(LogLiminalPortals, Error, TEXT("%s: %s"), Command, *Error);
+		if (!GIsEditor && FApp::IsUnattended() && !bRunInProgress)
+		{
+			FPlatformMisc::RequestExitWithStatus(true, StartFailureExitCode, Command);
+		}
+	}
+
+	template <typename RunType>
+	bool IsInProgress(const TUniquePtr<RunType>& Run)
+	{
+		return Run && !Run->IsFinished();
+	}
+
 	void RunCalibrateCommand(const TArray<FString>& Args, UWorld* World)
 	{
 		const FString Tag = Args.IsEmpty() ? FString() : Args[0];
 		FString Error;
+		const bool bInProgress = IsInProgress(GCalibrationRun);
 		if (!LiminalDebugCommands::StartCalibration(World, Tag, Error))
 		{
-			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Calibrate: %s"), *Error);
+			FailCommandStart(TEXT("Liminal.Calibrate"), Error, bInProgress);
 		}
 	}
 
@@ -69,22 +98,25 @@ namespace
 		int32 Cycles = FLiminalSelfTestRun::FConfig().CyclesPerDoor;
 		if (!Args.IsEmpty() && !LexTryParseString(Cycles, *Args[0]))
 		{
-			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.SelfTest: '%s' no es un número de ciclos"), *Args[0]);
+			FailCommandStart(TEXT("Liminal.SelfTest"), FString::Printf(TEXT("'%s' no es un número de ciclos"), *Args[0]),
+				IsInProgress(GSelfTestRun));
 			return;
 		}
 		FString Error;
+		const bool bInProgress = IsInProgress(GSelfTestRun);
 		if (!LiminalDebugCommands::StartSelfTest(World, Cycles, Error))
 		{
-			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.SelfTest: %s"), *Error);
+			FailCommandStart(TEXT("Liminal.SelfTest"), Error, bInProgress);
 		}
 	}
 
 	void RunTourCommand(const TArray<FString>& Args, UWorld* World)
 	{
 		FString Error;
+		const bool bInProgress = IsInProgress(GTourRun);
 		if (!LiminalDebugCommands::StartTour(World, Error))
 		{
-			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Tour: %s"), *Error);
+			FailCommandStart(TEXT("Liminal.Tour"), Error, bInProgress);
 		}
 	}
 
@@ -97,13 +129,15 @@ namespace
 			&& (Args.Num() < 2 || LexTryParseString(WarmupFrames, *Args[1]));
 		if (!bParsed)
 		{
-			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Bench: uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento]"));
+			FailCommandStart(TEXT("Liminal.Bench"), TEXT("uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento]"),
+				IsInProgress(GBenchRun));
 			return;
 		}
 		FString Error;
+		const bool bInProgress = IsInProgress(GBenchRun);
 		if (!LiminalDebugCommands::StartBench(World, MeasureFrames, WarmupFrames, Error))
 		{
-			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Bench: %s"), *Error);
+			FailCommandStart(TEXT("Liminal.Bench"), Error, bInProgress);
 		}
 	}
 

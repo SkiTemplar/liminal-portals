@@ -9,7 +9,8 @@ Para cada captura del índice tour.json:
   luminancia < DARK_LUMA. Una sombra sin luz de relleno (selva con la luz de cielo de E4: 97 % de
   píxeles < 20) pasaba la media de la imagen entera.
 
-En las vistas de puerta (con portalCorners, frameCorners y wallCorners en píxeles del viewport):
+En las vistas de puerta (kind = from_hub o from_biome; sin portalCorners, frameCorners o wallCorners
+en píxeles del viewport, la captura falla):
 - el hueco del portal no es un color plano (desviación > MIN_PORTAL_STD) y sus píxeles se alejan del
   color medio del marco más de MIN_PORTAL_FRAME_DIFF de media (distancia RGB): el portal muestra otra
   cosa que su propio marco (comparar solo las medias falla con un paisaje oscuro y variado);
@@ -48,6 +49,8 @@ DARK_LUMA = 20.0
 MAX_DARK_FOREGROUND = 0.25
 # Cara frontal de la pared de vuelta iluminada (con el sol de E3, en su propia sombra, rondaba 115).
 MIN_LIT_WALL_LUMA = 150.0
+# Vistas de puerta: tienen que traer los tres polígonos (sin ellos no se puede comprobar el hueco).
+DOOR_KINDS = frozenset({"from_hub", "from_biome"})
 # Píxeles que se recortan en cada borde de los polígonos (antialiasing y error de proyección).
 EDGE_PX = 3
 
@@ -133,10 +136,15 @@ def check_image(path: Path, shot: dict | None = None) -> dict:
         dark = dark_foreground_fraction(pixels)
         result["darkForeground"] = round(dark, 4)
         ok = ok and dark <= MAX_DARK_FOREGROUND
+    kind = (shot or {}).get("kind")
     regions = door_regions(shot or {}, (pixels.shape[1], pixels.shape[0]))
     if regions is not None:
-        result["door"] = check_door(pixels, regions, (shot or {}).get("kind") == "from_biome")
+        result["door"] = check_door(pixels, regions, kind == "from_biome")
         ok = ok and result["door"]["ok"]
+    elif kind in DOOR_KINDS:
+        # Sin polígonos, una vista de puerta solo pasaría la luminancia global: se da por fallida.
+        result["door"] = {"ok": False, "error": "vista de puerta sin portalCorners, frameCorners o wallCorners"}
+        ok = False
     result["ok"] = ok
     return result
 

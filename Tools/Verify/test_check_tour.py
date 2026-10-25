@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from check_tour import (MAX_DARK_FOREGROUND, MIN_LIT_WALL_LUMA, MIN_MEAN_LUMA, center_crop, check_tour,
-                         mean_luma)
+from check_tour import (MAX_DARK_FOREGROUND, MIN_LIT_WALL_LUMA, MIN_MEAN_LUMA, MIN_PORTAL_FRAME_DIFF, MIN_PORTAL_STD,
+                         center_crop, check_tour, mean_luma)
 from make_lamina import THUMB_SIZE, make_lamina
 
 # Vista de puerta sintética de 200 × 160: hueco [80, 120] × [40, 120], marco +10 px, pared +20 px.
@@ -110,6 +110,31 @@ class DoorRegionTest(unittest.TestCase):
             self.assertFalse(result["shots"][0]["ok"])
             self.assertFalse(result["shots"][1]["ok"])
             self.assertLess(result["shots"][1]["door"]["portalStd"], 1.0)
+
+    def test_portal_close_to_frame_fails_despite_texture(self):
+        # Aísla MIN_PORTAL_FRAME_DIFF: el hueco tiene textura (desviación > MIN_PORTAL_STD) pero su color
+        # ronda el del marco, como si mostrara el propio marco con ruido.
+        with tempfile.TemporaryDirectory() as tmp:
+            textured_frame = door_image(noisy((80, 40, 3), 90, 12, seed=6))
+            write_tour(Path(tmp), {"01_textured": textured_frame}, extra={"01_textured": door_fields("from_hub")})
+            door = check_tour(Path(tmp))["shots"][0]["door"]
+            self.assertGreater(door["portalStd"], MIN_PORTAL_STD)
+            self.assertLess(door["portalFrameDiff"], MIN_PORTAL_FRAME_DIFF)
+            self.assertFalse(door["ok"])
+
+    def test_door_view_without_polygons_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image = door_image(noisy((80, 40, 3), 170, 60, seed=7))
+            no_wall = dict(door_fields("from_biome"), wallCorners=[])
+            no_polygons = {"kind": "from_hub", "biome": "door0_Jungle"}
+            write_tour(Path(tmp), {"01_hub": image, "02_biome": image, "03_inside": image},
+                       extra={"01_hub": no_polygons, "02_biome": no_wall, "03_inside": {"kind": "inside"}})
+            result = check_tour(Path(tmp))
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["shots"][0]["ok"])
+            self.assertFalse(result["shots"][1]["ok"])
+            # Las vistas que no son de puerta no necesitan polígonos.
+            self.assertTrue(result["shots"][2]["ok"], result["shots"][2])
 
     def test_biome_view_requires_lit_wall(self):
         with tempfile.TemporaryDirectory() as tmp:
