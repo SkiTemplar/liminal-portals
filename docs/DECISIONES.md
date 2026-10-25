@@ -394,3 +394,27 @@ Las que surjan durante la implementación se añaden aquí con este formato:
   selva (14,7: paisaje oscuro y variado). Desde el bioma, la franja de pared debe tener luminancia ≥ 150
   (D-24; medido 212-220). `make_lamina.py` compone `Saved/Tour/lamina.png` (4 filas × 3 columnas).
 - **Cómo revertir**: `Debug/LiminalTour.*`, `Tools/Verify/check_tour.py`, `Tools/Verify/make_lamina.py`.
+
+### D-28 · Luz de cielo de L_Hub al doble y suelo de la selva más claro
+
+- **Contexto**: la verificación de E4 encontró el primer plano de la selva vista desde dentro negro
+  (`03_door0_Jungle_inside.png`: franja inferior y 500-720 con luminancia media 10,6 y 97 % de píxeles
+  < 20) y una banda casi negra cruzando el camino visto desde el hub. No es la sombra de la pared de vuelta
+  (cae detrás de ella, D-24), sino la de los árboles del lado del sol sobre el claro. Medido con el Tour:
+  sin oclusión de cielo (`r.Lumen.DiffuseIndirect.Allow 0`, `r.DistanceFieldAO 0`) la franja solo sube a
+  16,6, así que la oclusión de las copas explica una parte pequeña; el resto es el albedo del suelo de la
+  selva (musgo 0,04-0,17 de luminancia lineal y camino 0,08, frente a 0,17-0,5 en cultivos y 0,45-0,9 en
+  desierto y nieve) con la proporción sol/cielo de la `SkyAtmosphere` y el pie del tonemapper.
+- **Elegida**: dentro de la opción 1a (sol y cielo compartidos), dos cambios: SkyLight de `L_Hub` con
+  intensidad 2,0 (`HUB_SKY_INTENSITY` en `build_content.py`; `L_Calibration` sigue en 1,0) y suelo de la
+  selva con albedo verosímil (musgo `(0,10, 0,32, 0,08)`-`(0,09, 0,18, 0,05)`, camino `(0,26, 0,17, 0,09)`
+  en `LiminalTerrainMath::SampleColor`). Franja inferior de la selva: 10,6 → 23,3 solo con el albedo y
+  41,7 con los dos (0 % < 20); banda del camino desde el hub ~21 → ~58. Los otros biomas apenas cambian
+  (franja inferior: desierto 189 → 195, Antártida 221 → 225, cultivos 152 → 159). `check_tour.py` exige
+  ahora en las vistas `inside` como mucho un 25 % de píxeles < 20 en el 30 % inferior de la imagen.
+- **Alternativas**: un claro más grande alrededor de la puerta (con el sol a 35° la copa de un árbol de
+  16 m proyecta sombra a ~23 m: el claro tendría que ser asimétrico y depender del sol); luz direccional
+  de relleno por bioma con *lighting channels* (opción 1b, experimento de E5); `Skylight Leaking` de
+  Lumen (actúa sobre la oclusión, que no es la causa principal).
+- **Cómo revertir**: `HUB_SKY_INTENSITY = 1.0` y regenerar `L_Hub` (`Tools/content.ps1`); colores de la
+  selva en `World/LiminalTerrainMath.cpp`; `MAX_DARK_FOREGROUND` en `Tools/Verify/check_tour.py`.

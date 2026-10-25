@@ -3,7 +3,11 @@
 Para cada captura del índice tour.json:
 - existe, no es negra ni está quemada: luminancia media (Rec. 709 sobre los valores sRGB 0-255) de la
   imagen completa y del recuadro central entre MIN_MEAN_LUMA y MAX_MEAN_LUMA;
-- no es uniforme: la desviación típica de la luminancia supera MIN_LUMA_STD.
+- no es uniforme: la desviación típica de la luminancia supera MIN_LUMA_STD;
+- en las vistas desde dentro del bioma (kind = inside), el primer plano no es negro: en la franja
+  inferior (FOREGROUND_FRACTION del alto) como mucho MAX_DARK_FOREGROUND de los píxeles tiene
+  luminancia < DARK_LUMA. Una sombra sin luz de relleno (selva con la luz de cielo de E4: 97 % de
+  píxeles < 20) pasaba la media de la imagen entera.
 
 En las vistas de puerta (con portalCorners, frameCorners y wallCorners en píxeles del viewport):
 - el hueco del portal no es un color plano (desviación > MIN_PORTAL_STD) y sus píxeles se alejan del
@@ -37,6 +41,11 @@ MIN_LUMA_STD = 6.0
 # Hueco del portal: color plano (reserva, textura negra) y parecido con el marco.
 MIN_PORTAL_STD = 4.0
 MIN_PORTAL_FRAME_DIFF = 20.0
+# Primer plano de las vistas desde dentro: franja inferior (0,3 del alto = y >= 504 a 720 px) y
+# fracción máxima de píxeles casi negros (medido tras D-28: 0 % en los 4 biomas; antes, 97 % en la selva).
+FOREGROUND_FRACTION = 0.3
+DARK_LUMA = 20.0
+MAX_DARK_FOREGROUND = 0.25
 # Cara frontal de la pared de vuelta iluminada (con el sol de E3, en su propia sombra, rondaba 115).
 MIN_LIT_WALL_LUMA = 150.0
 # Píxeles que se recortan en cada borde de los polígonos (antialiasing y error de proyección).
@@ -105,6 +114,13 @@ def check_door(pixels: np.ndarray, regions: dict, require_lit_wall: bool = False
             "frameLuma": round(float(frame_mean @ LUMA), 2), "wallLuma": round(wall_luma, 2)}
 
 
+def dark_foreground_fraction(pixels: np.ndarray, fraction: float = FOREGROUND_FRACTION) -> float:
+    """Fracción de píxeles con luminancia < DARK_LUMA en la franja inferior de la imagen."""
+    height = pixels.shape[0]
+    band = pixels[height - max(1, int(round(height * fraction))):]
+    return float((luma(band) < DARK_LUMA).mean())
+
+
 def check_image(path: Path, shot: dict | None = None) -> dict:
     pixels = np.asarray(Image.open(path).convert("RGB"))
     whole = mean_luma(pixels)
@@ -113,6 +129,10 @@ def check_image(path: Path, shot: dict | None = None) -> dict:
     ok = all(MIN_MEAN_LUMA <= value <= MAX_MEAN_LUMA for value in (whole, center)) and deviation > MIN_LUMA_STD
     result = {"file": path.name, "size": [int(pixels.shape[1]), int(pixels.shape[0])],
               "meanLuma": round(whole, 2), "centerLuma": round(center, 2), "lumaStd": round(deviation, 2)}
+    if (shot or {}).get("kind") == "inside":
+        dark = dark_foreground_fraction(pixels)
+        result["darkForeground"] = round(dark, 4)
+        ok = ok and dark <= MAX_DARK_FOREGROUND
     regions = door_regions(shot or {}, (pixels.shape[1], pixels.shape[0]))
     if regions is not None:
         result["door"] = check_door(pixels, regions, (shot or {}).get("kind") == "from_biome")
@@ -137,15 +157,18 @@ def check_tour(tour_dir: Path) -> dict:
             continue
         shots.append(check_image(path, shot))
     ok = bool(shots) and all(shot["ok"] for shot in shots)
-    return {"ok": ok, "error": "" if ok else "alguna captura es negra, quemada, uniforme, sin portal distinto del marco o falta",
+    return {"ok": ok, "error": "" if ok else "alguna captura es negra, quemada, uniforme, con el primer plano negro, sin portal distinto del marco o falta",
             "thresholds": {"meanLuma": [MIN_MEAN_LUMA, MAX_MEAN_LUMA], "lumaStd": MIN_LUMA_STD,
                            "portalStd": MIN_PORTAL_STD, "portalFrameDiff": MIN_PORTAL_FRAME_DIFF,
-                           "litWallLuma": MIN_LIT_WALL_LUMA},
+                           "litWallLuma": MIN_LIT_WALL_LUMA,
+                           "darkForeground": [FOREGROUND_FRACTION, DARK_LUMA, MAX_DARK_FOREGROUND]},
             "shots": shots}
 
 
 def describe(shot: dict) -> str:
     text = f"media {shot.get('meanLuma', '-')}, centro {shot.get('centerLuma', '-')}, desv. {shot.get('lumaStd', '-')}"
+    if "darkForeground" in shot:
+        text += f"; primer plano < {DARK_LUMA:g}: {100 * shot['darkForeground']:.1f} %"
     door = shot.get("door")
     if door:
         text += (f"; hueco desv. {door.get('portalStd', '-')}, hueco-marco {door.get('portalFrameDiff', '-')}, "

@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from check_tour import MIN_LIT_WALL_LUMA, MIN_MEAN_LUMA, center_crop, check_tour, mean_luma
+from check_tour import (MAX_DARK_FOREGROUND, MIN_LIT_WALL_LUMA, MIN_MEAN_LUMA, center_crop, check_tour,
+                         mean_luma)
 from make_lamina import THUMB_SIZE, make_lamina
 
 # Vista de puerta sintética de 200 × 160: hueco [80, 120] × [40, 120], marco +10 px, pared +20 px.
@@ -123,6 +124,26 @@ class DoorRegionTest(unittest.TestCase):
             self.assertFalse(shots[1]["ok"])
             self.assertLess(shots[1]["door"]["wallLuma"], MIN_LIT_WALL_LUMA)
             # Desde el hub no se exige la pared iluminada.
+            self.assertTrue(shots[2]["ok"], shots[2])
+
+
+class ForegroundTest(unittest.TestCase):
+    def test_inside_view_with_black_foreground_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lit = noisy((100, 120, 3), 120, 40, seed=6)
+            black = lit.copy()
+            black[70:] = noisy((30, 120, 3), 8, 6, seed=7)
+            write_tour(Path(tmp), {"03_lit": lit, "03_black": black, "02_black": black},
+                       extra={"03_lit": {"kind": "inside"}, "03_black": {"kind": "inside"},
+                              "02_black": {"kind": "hub_overview"}})
+            shots = check_tour(Path(tmp))["shots"]
+            self.assertTrue(shots[0]["ok"], shots[0])
+            self.assertLessEqual(shots[0]["darkForeground"], MAX_DARK_FOREGROUND)
+            # La media de la imagen entera pasa, pero el primer plano es negro.
+            self.assertGreater(shots[1]["meanLuma"], MIN_MEAN_LUMA)
+            self.assertFalse(shots[1]["ok"])
+            self.assertGreater(shots[1]["darkForeground"], 0.9)
+            # Solo se exige en las vistas desde dentro.
             self.assertTrue(shots[2]["ok"], shots[2])
 
 

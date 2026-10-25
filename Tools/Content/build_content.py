@@ -15,7 +15,8 @@
 - Etapa E4: /Game/Biomes/Materials/M_Terrain (color por vértice del terreno procedural, guardado en
   sRGB, por un parámetro Color) con MI_Biome_<Tipo> como hijos, y MI_Scatter_<Categoría> (hijos de
   M_Basic) con los colores de ALiminalBiome::GetScatterColor. El sol de L_Hub llega por delante y de
-  lado a las puertas de vuelta (HUB_SUN_ROTATION); el de L_Calibration no cambia.
+  lado a las puertas de vuelta (HUB_SUN_ROTATION) y su SkyLight va al doble (HUB_SKY_INTENSITY, D-28);
+  el sol y el cielo de L_Calibration no cambian.
 
 Uso: powershell -File Tools/content.ps1 (lanza UnrealEditor-Cmd -run=pythonscript con este script).
 Escribe Saved/Content/build_content.json con el resultado; content.ps1 lo comprueba.
@@ -85,6 +86,11 @@ CALIBRATION_SUN_ROTATION = (0.0, -42.0, 35.0)
 # L_Hub (E4, D-24): la luz viaja hacia -X y +Y, así que llega a la cara frontal (+X) de cada pared de
 # vuelta y su sombra cae detrás y a un lado; desde el hub (mirando a +X) el paisaje tiene luz lateral.
 HUB_SUN_ROTATION = (0.0, -35.0, 125.0)
+# Luz de cielo: L_Calibration conserva la de E2 (1,0). En L_Hub (D-28) se dobla: con la SkyLight de la
+# SkyAtmosphere a 1,0 la sombra del sol sobre los suelos oscuros de la selva salía negra (97 % de los
+# píxeles del primer plano por debajo de 20).
+CALIBRATION_SKY_INTENSITY = 1.0
+HUB_SKY_INTENSITY = 2.0
 
 
 def build_surface_material():
@@ -181,7 +187,7 @@ def place_scatter(actors, mats):
                        mats[colors[rng.randrange(len(colors))]], f"Scatter_{index:02d}_{shape}", rng.uniform(0.0, 90.0))
 
 
-def place_lighting(actors, sun_rotation=CALIBRATION_SUN_ROTATION):
+def place_lighting(actors, sun_rotation=CALIBRATION_SUN_ROTATION, sky_intensity=CALIBRATION_SKY_INTENSITY):
     sun = cu.spawn(actors, unreal.DirectionalLight, unreal.Vector(0.0, 0.0, 1000.0), "Sun")
     sun.set_actor_rotation(unreal.Rotator(*sun_rotation), False)
     sun_component = sun.get_component_by_class(unreal.DirectionalLightComponent)
@@ -195,6 +201,7 @@ def place_lighting(actors, sun_rotation=CALIBRATION_SUN_ROTATION):
     sky_component = sky.get_component_by_class(unreal.SkyLightComponent)
     sky_component.set_editor_property("mobility", unreal.ComponentMobility.MOVABLE)
     sky_component.set_editor_property("real_time_capture", True)
+    sky_component.set_editor_property("intensity", sky_intensity)
 
 
 def place_post_process(actors):
@@ -442,7 +449,7 @@ def build_hub_map(basic):
     biomes, biome_stats = place_biomes(actors, biome_mats, scatter_mats, hub_mats["Wall"], hub)
     pairs = place_hub_portals(actors, hub, biomes)
     check_hub_portals(pairs)
-    place_lighting(actors, HUB_SUN_ROTATION)
+    place_lighting(actors, HUB_SUN_ROTATION, HUB_SKY_INTENSITY)
     place_post_process(actors)
     cu.spawn(actors, unreal.PlayerStart, unreal.Vector(*HUB_PLAYER_START), "PlayerStart", 0.0)
 

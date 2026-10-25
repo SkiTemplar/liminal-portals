@@ -280,8 +280,8 @@ namespace LiminalTerrainMath
 		{
 		case ELiminalBiomeType::Jungle:
 		{
-			const FLinearColor Moss = LiminalTerrainMathDetail::Mix(FLinearColor(0.05f, 0.22f, 0.06f), FLinearColor(0.04f, 0.08f, 0.02f), Variation);
-			return LiminalTerrainMathDetail::Mix(Moss, FLinearColor(0.12f, 0.075f, 0.04f), LiminalTerrainMathDetail::PathMix(Params.FlatZone, Point));
+			const FLinearColor Moss = LiminalTerrainMathDetail::Mix(FLinearColor(0.10f, 0.32f, 0.08f), FLinearColor(0.09f, 0.18f, 0.05f), Variation);
+			return LiminalTerrainMathDetail::Mix(Moss, FLinearColor(0.26f, 0.17f, 0.09f), LiminalTerrainMathDetail::PathMix(Params.FlatZone, Point));
 		}
 		case ELiminalBiomeType::Desert:
 		{
