@@ -6,7 +6,7 @@
 
 namespace LiminalPortalMathTests
 {
-	constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
+	constexpr EAutomationTestFlags PortalMathTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
 	constexpr double PositionTolerance = 1e-3;
 	constexpr double AngleTolerance = 1e-4;
 
@@ -34,7 +34,7 @@ namespace LiminalPortalMathTests
 using namespace LiminalPortalMathTests;
 using namespace LiminalPortalMath;
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferCoincidentTest, "LiminalPortals.Math.Transfer.CoincidentOppositeIsIdentity", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferCoincidentTest, "LiminalPortals.Math.Transfer.CoincidentOppositeIsIdentity", PortalMathTestFlags)
 bool FLiminalTransferCoincidentTest::RunTest(const FString& Parameters)
 {
 	// Calibración (E2): A y B en el mismo sitio mirando al lado contrario ⇒ paso identidad.
@@ -51,7 +51,7 @@ bool FLiminalTransferCoincidentTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferFrontToFrontTest, "LiminalPortals.Math.Transfer.FrontMapsBehindTarget", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferFrontToFrontTest, "LiminalPortals.Math.Transfer.FrontMapsBehindTarget", PortalMathTestFlags)
 bool FLiminalTransferFrontToFrontTest::RunTest(const FString& Parameters)
 {
 	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
@@ -70,7 +70,7 @@ bool FLiminalTransferFrontToFrontTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferRoundTripTest, "LiminalPortals.Math.Transfer.RoundTripIsIdentity", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferRoundTripTest, "LiminalPortals.Math.Transfer.RoundTripIsIdentity", PortalMathTestFlags)
 bool FLiminalTransferRoundTripTest::RunTest(const FString& Parameters)
 {
 	FRandomStream Stream(20261025);
@@ -97,7 +97,7 @@ bool FLiminalTransferRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferVelocityTest, "LiminalPortals.Math.Transfer.VelocityPreservedAndRotated", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferVelocityTest, "LiminalPortals.Math.Transfer.VelocityPreservedAndRotated", PortalMathTestFlags)
 bool FLiminalTransferVelocityTest::RunTest(const FString& Parameters)
 {
 	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
@@ -114,7 +114,7 @@ bool FLiminalTransferVelocityTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferScaleTest, "LiminalPortals.Math.Transfer.IgnoresPortalScale", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferScaleTest, "LiminalPortals.Math.Transfer.IgnoresPortalScale", PortalMathTestFlags)
 bool FLiminalTransferScaleTest::RunTest(const FString& Parameters)
 {
 	FTransform ScaledA = PortalA;
@@ -132,7 +132,7 @@ bool FLiminalTransferScaleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferTransformTest, "LiminalPortals.Math.Transfer.TransformMatchesParts", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferTransformTest, "LiminalPortals.Math.Transfer.TransformMatchesParts", PortalMathTestFlags)
 bool FLiminalTransferTransformTest::RunTest(const FString& Parameters)
 {
 	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
@@ -147,7 +147,7 @@ bool FLiminalTransferTransformTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalControlRotationTest, "LiminalPortals.Math.ControlRotation.YawPitchKept", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalControlRotationTest, "LiminalPortals.Math.ControlRotation.YawPitchKept", PortalMathTestFlags)
 bool FLiminalControlRotationTest::RunTest(const FString& Parameters)
 {
 	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
@@ -163,7 +163,7 @@ bool FLiminalControlRotationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalControlRollTest, "LiminalPortals.Math.ControlRotation.RollForcedToZero", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalControlRollTest, "LiminalPortals.Math.ControlRotation.RollForcedToZero", PortalMathTestFlags)
 bool FLiminalControlRollTest::RunTest(const FString& Parameters)
 {
 	// Destino ladeado: la rotación completa tendría roll, la de control no.
@@ -182,7 +182,7 @@ bool FLiminalControlRollTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalSignedDistanceTest, "LiminalPortals.Math.Plane.SignedDistance", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalSignedDistanceTest, "LiminalPortals.Math.Plane.SignedDistance", PortalMathTestFlags)
 bool FLiminalSignedDistanceTest::RunTest(const FString& Parameters)
 {
 	TestNearlyEqual(TEXT("Delante de B"), SignedDistanceToPlane(PortalB, PortalB.TransformPosition(FVector(25.0, 40.0, 10.0))), 25.0, PositionTolerance);
@@ -192,7 +192,7 @@ bool FLiminalSignedDistanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingFrontTest, "LiminalPortals.Math.Crossing.FrontToBackInside", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingFrontTest, "LiminalPortals.Math.Crossing.FrontToBackInside", PortalMathTestFlags)
 bool FLiminalCrossingFrontTest::RunTest(const FString& Parameters)
 {
 	const FVector2D HalfExtents(60.0, 110.0);
@@ -211,7 +211,7 @@ bool FLiminalCrossingFrontTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingBackTest, "LiminalPortals.Math.Crossing.BackToFrontIgnored", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingBackTest, "LiminalPortals.Math.Crossing.BackToFrontIgnored", PortalMathTestFlags)
 bool FLiminalCrossingBackTest::RunTest(const FString& Parameters)
 {
 	const FVector2D HalfExtents(60.0, 110.0);
@@ -223,7 +223,7 @@ bool FLiminalCrossingBackTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingBoundsTest, "LiminalPortals.Math.Crossing.OutOfBoundsIgnored", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingBoundsTest, "LiminalPortals.Math.Crossing.OutOfBoundsIgnored", PortalMathTestFlags)
 bool FLiminalCrossingBoundsTest::RunTest(const FString& Parameters)
 {
 	const FVector2D HalfExtents(60.0, 110.0);
@@ -241,7 +241,7 @@ bool FLiminalCrossingBoundsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalClipPlaneTest, "LiminalPortals.Math.ClipPlane.TargetFront", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalClipPlaneTest, "LiminalPortals.Math.ClipPlane.TargetFront", PortalMathTestFlags)
 bool FLiminalClipPlaneTest::RunTest(const FString& Parameters)
 {
 	const FClipPlane Plane = ComputeClipPlane(PortalB, -1.0);
@@ -258,7 +258,7 @@ bool FLiminalClipPlaneTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalVisibilityTest, "LiminalPortals.Math.Visibility.FrontAndCone", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalVisibilityTest, "LiminalPortals.Math.Visibility.FrontAndCone", PortalMathTestFlags)
 bool FLiminalVisibilityTest::RunTest(const FString& Parameters)
 {
 	const FVector2D HalfExtents(60.0, 110.0);
@@ -276,7 +276,7 @@ bool FLiminalVisibilityTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalSurfaceDepthTest, "LiminalPortals.Math.Surface.DepthNearPlane", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalSurfaceDepthTest, "LiminalPortals.Math.Surface.DepthNearPlane", PortalMathTestFlags)
 bool FLiminalSurfaceDepthTest::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Cerca por delante ⇒ extendida"), ComputeSurfaceDepth(10.0, 60.f, 1.f, 40.f), 40.f);
@@ -289,7 +289,7 @@ bool FLiminalSurfaceDepthTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalRenderTargetSizeTest, "LiminalPortals.Math.RenderTarget.Size", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalRenderTargetSizeTest, "LiminalPortals.Math.RenderTarget.Size", PortalMathTestFlags)
 bool FLiminalRenderTargetSizeTest::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Igual al viewport"), ComputeRenderTargetSize(FIntPoint(1920, 1080), 0.f, 1.f, 4096), FIntPoint(1920, 1080));
@@ -305,7 +305,7 @@ bool FLiminalRenderTargetSizeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalLargeOffsetTest, "LiminalPortals.Math.Transfer.LargeWorldPrecision", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalLargeOffsetTest, "LiminalPortals.Math.Transfer.LargeWorldPrecision", PortalMathTestFlags)
 bool FLiminalLargeOffsetTest::RunTest(const FString& Parameters)
 {
 	// Biomas a k × 20 km: el ida y vuelta tiene que seguir siendo submilimétrico con LWC.

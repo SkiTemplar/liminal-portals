@@ -6,14 +6,14 @@
 
 namespace LiminalCalibrationMathTests
 {
-	constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
+	constexpr EAutomationTestFlags CalibrationMathTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
 	const FIntPoint Viewport(1280, 720);
 }
 
 using namespace LiminalCalibrationMathTests;
 using namespace LiminalCalibrationMath;
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalYawSweepTest, "LiminalPortals.Calibration.YawSweep.TriangleStep", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalYawSweepTest, "LiminalPortals.Calibration.YawSweep.TriangleStep", CalibrationMathTestFlags)
 bool FLiminalYawSweepTest::RunTest(const FString& Parameters)
 {
 	const TArray<double> Sweep = MakeYawSweep(10.0, 20.0, 17);
@@ -41,7 +41,7 @@ bool FLiminalYawSweepTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalProjectToViewportTest, "LiminalPortals.Calibration.ProjectToViewport.Perspective", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalProjectToViewportTest, "LiminalPortals.Calibration.ProjectToViewport.Perspective", CalibrationMathTestFlags)
 bool FLiminalProjectToViewportTest::RunTest(const FString& Parameters)
 {
 	const FVector Eye(0.0, 0.0, 100.0);
@@ -71,7 +71,7 @@ bool FLiminalProjectToViewportTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalCornersTest, "LiminalPortals.Calibration.PortalCorners.Rectangle", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalCornersTest, "LiminalPortals.Calibration.PortalCorners.Rectangle", CalibrationMathTestFlags)
 bool FLiminalPortalCornersTest::RunTest(const FString& Parameters)
 {
 	const FTransform Plane(FRotator(0.0, 90.0, 0.0), FVector(100.0, 200.0, 150.0));
@@ -92,7 +92,7 @@ bool FLiminalPortalCornersTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCalibrationTagTest, "LiminalPortals.Calibration.OutputTag.Validation", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCalibrationTagTest, "LiminalPortals.Calibration.OutputTag.Validation", CalibrationMathTestFlags)
 bool FLiminalCalibrationTagTest::RunTest(const FString& Parameters)
 {
 	TestTrue(TEXT("Vacía"), LiminalDebugCommands::IsValidOutputTag(FString()));

@@ -1,6 +1,8 @@
 #include "Misc/AutomationTest.h"
 
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/RectLightComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -9,12 +11,15 @@
 #include "Portal/LiminalPortal.h"
 #include "Portal/LiminalPortalMath.h"
 #include "Portal/LiminalPortalSubsystem.h"
+#include "World/LiminalBiome.h"
+#include "World/LiminalHub.h"
+#include "World/LiminalWorldLayout.h"
 
 // Tests de integración ligeros: mundo de juego vacío sin render, actores reales y sin mapa.
 
 namespace LiminalPortalWorldTests
 {
-	constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
+	constexpr EAutomationTestFlags WorldTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
 
 	/**
 	 * Mundo de juego temporal con los actores inicializados para jugar (mismo esquema que
@@ -77,7 +82,7 @@ namespace LiminalPortalWorldTests
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalCalibrationFlagsTest, "LiminalPortals.World.Portal.CalibrationFlags", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalCalibrationFlagsTest, "LiminalPortals.World.Portal.CalibrationFlags", WorldTestFlags)
 bool FLiminalPortalCalibrationFlagsTest::RunTest(const FString& Parameters)
 {
 	AddExpectedMessage(TEXT("Material de"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, -1);
@@ -128,7 +133,7 @@ bool FLiminalPortalCalibrationFlagsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalActorTest, "LiminalPortals.World.Portal.RegisterLinkAndLayout", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalActorTest, "LiminalPortals.World.Portal.RegisterLinkAndLayout", WorldTestFlags)
 bool FLiminalPortalActorTest::RunTest(const FString& Parameters)
 {
 	// Si los materiales de Content/ no existen, el portal avisa y sigue (no debe romper).
@@ -171,7 +176,7 @@ bool FLiminalPortalActorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCharacterTeleportTest, "LiminalPortals.World.Character.TeleportThroughPortal", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCharacterTeleportTest, "LiminalPortals.World.Character.TeleportThroughPortal", WorldTestFlags)
 bool FLiminalCharacterTeleportTest::RunTest(const FString& Parameters)
 {
 	FScopedGameWorld Scope;
@@ -198,5 +203,90 @@ bool FLiminalCharacterTeleportTest::RunTest(const FString& Parameters)
 
 	// Negativo: el personaje ya no está en el hub.
 	TestTrue(TEXT("Se ha movido al destino"), FVector::Dist(Character->GetActorLocation(), StartLocation) > 30000.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalHubActorTest, "LiminalPortals.World.Hub.DoorsAndGeometry", WorldTestFlags)
+bool FLiminalHubActorTest::RunTest(const FString& Parameters)
+{
+	// Un índice fuera de rango avisa (caso negativo de abajo).
+	AddExpectedMessage(TEXT("no existe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+
+	FScopedGameWorld Scope;
+	UTEST_NOT_NULL(TEXT("Mundo"), Scope.World);
+	const FTransform HubTransform(FRotator(0.0, 30.0, 0.0), FVector(1000.0, -2000.0, 50.0));
+	ALiminalHub* Hub = Scope.Spawn<ALiminalHub>(HubTransform);
+	UTEST_NOT_NULL(TEXT("Hub"), Hub);
+	TestEqual(TEXT("Cuatro puertas"), Hub->GetNumDoors(), 4);
+
+	// GetDoorTransform es el layout puro llevado al transform del hub.
+	const LiminalWorldLayout::FHubLayout Layout = Hub->MakeLayout();
+	for (int32 Index = 0; Index < Hub->GetNumDoors(); ++Index)
+	{
+		FTransform Local;
+		UTEST_TRUE(TEXT("Puerta del layout"), LiminalWorldLayout::GetHubDoorTransform(Layout, Index, Local));
+		TestTrue(TEXT("Puerta en mundo"), Hub->GetDoorTransform(Index).Equals(Local * HubTransform, 1e-3));
+	}
+
+	LiminalWorldLayout::FHubGeometry Geometry;
+	UTEST_TRUE(TEXT("Geometría"), LiminalWorldLayout::BuildHubGeometry(Layout, Geometry));
+	const UInstancedStaticMeshComponent* Walls = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Hub, TEXT("Walls")));
+	UTEST_NOT_NULL(TEXT("Paredes"), Walls);
+	TestEqual(TEXT("Una instancia por caja de pared"), Walls->GetInstanceCount(), Geometry.Walls.Num());
+	TInlineComponentArray<URectLightComponent*> Lights(Hub);
+	TestEqual(TEXT("Una RectLight por panel"), Lights.Num(), ALiminalHub::NumCeilingLights);
+
+	// La cápsula del jugador pasa por el hueco de la puerta y no atraviesa la pared de al lado.
+	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(34.f, 88.f);
+	const FTransform Door = Hub->GetDoorTransform(0);
+	const FVector Inside = Door.TransformPositionNoScale(FVector(100.0, 0.0, 92.0));
+	const FVector Outside = Door.TransformPositionNoScale(FVector(-100.0, 0.0, 92.0));
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(LiminalHubTest), false);
+	TestFalse(TEXT("La cápsula cruza el hueco"), Scope.World->SweepTestByChannel(Inside, Outside, FQuat::Identity, ECC_Pawn, Capsule, Params));
+	const FVector Beside(0.0, Layout.DoorSize.X, 0.0);
+	TestTrue(TEXT("La pared de al lado bloquea"), Scope.World->SweepTestByChannel(Inside + Door.TransformVectorNoScale(Beside),
+		Outside + Door.TransformVectorNoScale(Beside), FQuat::Identity, ECC_Pawn, Capsule, Params));
+
+	TestTrue(TEXT("Fuera de rango ⇒ transform del hub"), Hub->GetDoorTransform(7).Equals(HubTransform, 1e-6));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBiomeActorTest, "LiminalPortals.World.Biome.ReturnDoorAndGround", WorldTestFlags)
+bool FLiminalBiomeActorTest::RunTest(const FString& Parameters)
+{
+	FScopedGameWorld Scope;
+	UTEST_NOT_NULL(TEXT("Mundo"), Scope.World);
+	const FVector Origin = LiminalWorldLayout::GetBiomeOrigin(2);
+	ALiminalBiome* Biome = Scope.Spawn<ALiminalBiome>(FTransform(FRotator(0.0, 45.0, 0.0), Origin));
+	UTEST_NOT_NULL(TEXT("Bioma"), Biome);
+
+	const FTransform Door = Biome->GetReturnDoorTransform();
+	TestTrue(TEXT("Puerta en el origen del bioma"), Door.GetLocation().Equals(Origin, 1e-6));
+	TestTrue(TEXT("Puerta sin escala"), Door.GetScale3D().Equals(FVector::OneVector));
+	TestNearlyEqual(TEXT("Mira con el bioma"), Door.Rotator().Yaw, 45.0, 1e-4);
+
+	const UPrimitiveComponent* Ground = FindPrimitive(Biome, TEXT("Ground"));
+	UTEST_NOT_NULL(TEXT("Suelo"), Ground);
+	TestNearlyEqual(TEXT("Cara superior del suelo a ras de la puerta"), Ground->Bounds.GetBox().Max.Z, Origin.Z, 0.5);
+	const UInstancedStaticMeshComponent* Wall = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Biome, TEXT("ReturnWall")));
+	UTEST_NOT_NULL(TEXT("Pared exenta"), Wall);
+	TestEqual(TEXT("Dos tramos y dintel"), Wall->GetInstanceCount(), 3);
+
+	// Cada tipo tiene un color propio (el suelo de blockout los distingue).
+	const FLinearColor Jungle = ALiminalBiome::GetBiomeBaseColor(ELiminalBiomeType::Jungle);
+	TestFalse(TEXT("Selva ≠ desierto"), Jungle.Equals(ALiminalBiome::GetBiomeBaseColor(ELiminalBiomeType::Desert)));
+	TestFalse(TEXT("Antártida ≠ cultivos"), ALiminalBiome::GetBiomeBaseColor(ELiminalBiomeType::Antarctic)
+		.Equals(ALiminalBiome::GetBiomeBaseColor(ELiminalBiomeType::Farmland)));
+	TestEqual(TEXT("Nombre estable"), ALiminalBiome::GetBiomeTypeName(ELiminalBiomeType::Antarctic), FString(TEXT("Antarctic")));
+
+	// Negativo: si la puerta no cabe en la pared, no hay pared (y se avisa).
+	AddExpectedMessage(TEXT("no cabe en la pared"), ELogVerbosity::Error, EAutomationExpectedMessageFlags::Contains, 1);
+	ALiminalBiome* Narrow = Scope.World->SpawnActorDeferred<ALiminalBiome>(ALiminalBiome::StaticClass(), FTransform::Identity);
+	UTEST_NOT_NULL(TEXT("Bioma estrecho"), Narrow);
+	Narrow->WallSize = FVector(20.0, 100.0, 350.0);
+	Narrow->FinishSpawning(FTransform::Identity);
+	const UInstancedStaticMeshComponent* NarrowWall = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Narrow, TEXT("ReturnWall")));
+	UTEST_NOT_NULL(TEXT("Pared del estrecho"), NarrowWall);
+	TestEqual(TEXT("Sin pared"), NarrowWall->GetInstanceCount(), 0);
 	return true;
 }

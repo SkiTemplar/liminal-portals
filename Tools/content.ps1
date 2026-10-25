@@ -1,5 +1,5 @@
 ﻿# Regenera el contenido creado por script (Tools/Content/build_content.py): materiales del portal,
-# M_Basic y el mapa de calibración. Lanza UnrealEditor-Cmd -run=pythonscript con tiempo máximo y
+# M_Basic, el mapa de calibración y L_Hub (hub, biomas y portales). Lanza UnrealEditor-Cmd -run=pythonscript con tiempo máximo y
 # comprueba Saved/Content/build_content.json. Cerrar el editor antes (bloquea los paquetes).
 # Uso: powershell -File Tools/content.ps1 [-Script Tools/Content/build_content.py] [-TimeoutMinutes 30]
 param(
@@ -30,4 +30,5 @@ if (Test-Path $logPath) {
 if (-not (Test-Path $resultPath)) { throw "No se generó $resultPath (código $($proc.ExitCode); log: $logPath)" }
 $result = Get-Content $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $result.ok) { throw "build_content falló: $($result.error)" }
-Write-Output "Contenido listo: $($result.assets.Count) assets; L_Calibration con $($result.calibrationActors) actores"
+Write-Output "Contenido listo: $($result.assets.Count) assets; L_Calibration con $($result.calibrationActors) actores; L_Hub con $($result.hubActors) actores y $($result.hubPortals) portales"
+if ($result.hubPortals -ne 8) { throw "L_Hub debe tener 8 portales y tiene $($result.hubPortals)" }

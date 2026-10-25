@@ -8,6 +8,10 @@
 - /Game/Maps/L_Calibration: sala abierta con geometría de colores variados, sol, SkyAtmosphere,
   SkyLight, post-process global con exposición manual y los portales A/B coincidentes mirando a
   lados opuestos (paso = identidad). Sin niebla: se aplicaría también sobre la superficie del portal.
+- /Game/Maps/L_Hub (etapa E3, mapa por defecto): ALiminalHub en el origen, cuatro ALiminalBiome a
+  k × 20 km en X (k = 1..4: selva, desierto, Antártida, cultivos), ocho portales enlazados por
+  parejas (puerta del hub <-> puerta de vuelta), el mismo sol, cielo, SkyLight y post-process global
+  que la calibración, y el PlayerStart dentro del hub. Materiales MI_Hub_* y MI_Biome_*.
 
 Uso: powershell -File Tools/content.ps1 (lanza UnrealEditor-Cmd -run=pythonscript con este script).
 Escribe Saved/Content/build_content.json con el resultado; content.ps1 lo comprueba.
@@ -32,7 +36,12 @@ FALLBACK_PATH = "/Game/Portal/Materials/M_PortalFallback"
 BASIC_PATH = "/Game/Common/Materials/M_Basic"
 CALIB_MI_FOLDER = "/Game/Calibration/Materials"
 CALIBRATION_MAP = "/Game/Maps/L_Calibration"
+HUB_MAP = "/Game/Maps/L_Hub"
 PORTAL_CLASS = "/Script/LiminalPortals.LiminalPortal"
+HUB_CLASS = "/Script/LiminalPortals.LiminalHub"
+BIOME_CLASS = "/Script/LiminalPortals.LiminalBiome"
+HUB_MI_FOLDER = "/Game/Hub/Materials"
+BIOME_MI_FOLDER = "/Game/Biomes/Materials"
 
 # Debe coincidir con SurfaceTextureParameter de Config/DefaultGame.ini.
 SURFACE_TEXTURE_PARAMETER = "PortalTexture"
@@ -98,6 +107,8 @@ def build_fallback_material():
 
 def build_basic_material():
     material = cu.recreate_material(BASIC_PATH)
+    # El hub y los biomas son cubos instanciados (ISM): sin este uso, el juego cae al material por defecto.
+    material.set_editor_property("used_with_instanced_static_meshes", True)
     color = cu.vector_param(material, "Color", (0.5, 0.5, 0.5), -400, -200)
     roughness = cu.scalar_param(material, "Roughness", 0.6, -400, 0)
     emissive = cu.vector_param(material, "Emissive", (0.0, 0.0, 0.0), -400, 200)
@@ -238,6 +249,147 @@ def build_calibration_map(mats):
     return count
 
 
+# L_Hub (E3). Colores lineales: paredes claras amarillentas, moqueta mostaza y techo de placas.
+HUB_COLORS = {
+    "Wall": ((0.72, 0.66, 0.48), 0.85),
+    "Carpet": ((0.30, 0.25, 0.12), 0.95),
+    "Ceiling": ((0.76, 0.75, 0.70), 0.9),
+}
+LIGHT_PANEL_COLOR = (0.9, 0.9, 0.85)
+LIGHT_PANEL_EMISSIVE = (6.0, 5.8, 5.2)
+# Separación de los biomas (decisión 11): k × 20 km en X; igual que LiminalWorldLayout::BiomeSpacing.
+BIOME_SPACING = 2000000.0
+BIOMES = [("JUNGLE", 1001), ("DESERT", 1002), ("ANTARCTIC", 1003), ("FARMLAND", 1004)]
+HUB_PLAYER_START = (-650.0, 0.0, 100.0)
+# Las dos puertas de una pareja están en mundos distintos: a más de 1 km.
+MIN_PAIR_DISTANCE = 100000.0
+
+
+def build_hub_instances(basic):
+    instances = {}
+    for name, (color, roughness) in HUB_COLORS.items():
+        instances[name] = cu.ensure_material_instance(f"{HUB_MI_FOLDER}/MI_Hub_{name}", basic,
+                                                      {"Color": color}, {"Roughness": roughness})
+    instances["LightPanel"] = cu.ensure_material_instance(f"{HUB_MI_FOLDER}/MI_Hub_LightPanel", basic,
+                                                          {"Color": LIGHT_PANEL_COLOR, "Emissive": LIGHT_PANEL_EMISSIVE},
+                                                          {"Roughness": 0.5})
+    return instances
+
+
+def build_biome_instances(basic):
+    """Un MI por tipo de bioma con el color de ALiminalBiome::GetBiomeBaseColor (fuente única en C++)."""
+    instances = {}
+    for type_name, _seed in BIOMES:
+        biome_type = getattr(unreal.LiminalBiomeType, type_name)
+        color = unreal.LiminalBiome.get_biome_base_color(biome_type)
+        label = unreal.LiminalBiome.get_biome_type_name(biome_type)
+        instances[type_name] = cu.ensure_material_instance(f"{BIOME_MI_FOLDER}/MI_Biome_{label}", basic,
+                                                           {"Color": (color.r, color.g, color.b)}, {"Roughness": 0.9})
+    return instances
+
+
+def check_generated(actor, label, material):
+    """El OnConstruction del actor debe haber generado cajas con el material asignado."""
+    components = actor.get_components_by_class(unreal.InstancedStaticMeshComponent)
+    cu.require(components, f"{label} no tiene componentes de cajas")
+    filled = [c for c in components if c.get_instance_count() > 0]
+    cu.require(filled, f"{label} no generó geometría")
+    cu.require(any(c.get_material(0) == material for c in filled), f"{label} no tiene el material asignado")
+
+
+def place_hub(actors, hub_mats):
+    hub = cu.spawn(actors, cu.load_class(HUB_CLASS), unreal.Vector(0.0, 0.0, 0.0), "Hub")
+    # Cada set_editor_property vuelve a ejecutar OnConstruction (PostEditChangeProperty).
+    hub.set_editor_property("wall_material", hub_mats["Wall"])
+    hub.set_editor_property("carpet_material", hub_mats["Carpet"])
+    hub.set_editor_property("ceiling_material", hub_mats["Ceiling"])
+    hub.set_editor_property("light_panel_material", hub_mats["LightPanel"])
+    check_generated(hub, "Hub", hub_mats["Wall"])
+    cu.require(hub.get_num_doors() == len(BIOMES), f"El hub tiene {hub.get_num_doors()} puertas y hay {len(BIOMES)} biomas")
+    return hub
+
+
+def place_biomes(actors, biome_mats, wall_material, hub):
+    biomes = []
+    door_size = hub.get_editor_property("door_size")
+    frame = hub.get_editor_property("door_frame_thickness")
+    for index, (type_name, seed) in enumerate(BIOMES):
+        biome_type = getattr(unreal.LiminalBiomeType, type_name)
+        label = unreal.LiminalBiome.get_biome_type_name(biome_type)
+        location = unreal.Vector((index + 1) * BIOME_SPACING, 0.0, 0.0)
+        biome = cu.spawn(actors, cu.load_class(BIOME_CLASS), location, f"Biome_{label}")
+        biome.set_editor_property("biome_type", biome_type)
+        biome.set_editor_property("seed", seed)
+        biome.set_editor_property("door_size", door_size)
+        biome.set_editor_property("door_frame_thickness", frame)
+        biome.set_editor_property("ground_material", biome_mats[type_name])
+        biome.set_editor_property("wall_material", wall_material)
+        check_generated(biome, f"Biome_{label}", wall_material)
+        biomes.append((label, biome))
+    return biomes
+
+
+def spawn_portal(actors, portal_class, transform, label, size, frame):
+    portal = cu.spawn(actors, portal_class, transform.translation, label)
+    portal.set_actor_transform(transform, False, False)
+    portal.set_editor_property("portal_size", size)
+    portal.set_editor_property("frame_thickness", frame)
+    return portal
+
+
+def place_hub_portals(actors, hub, biomes):
+    """Ocho portales: la puerta k del hub enlaza con la puerta de vuelta del bioma k y al revés."""
+    portal_class = cu.load_class(PORTAL_CLASS)
+    size = hub.get_editor_property("door_size")
+    frame = hub.get_editor_property("door_frame_thickness")
+    pairs = []
+    for index, (label, biome) in enumerate(biomes):
+        hub_portal = spawn_portal(actors, portal_class, hub.get_door_transform(index), f"Portal_Hub_{label}", size, frame)
+        biome_portal = spawn_portal(actors, portal_class, biome.get_return_door_transform(), f"Portal_{label}_Return", size, frame)
+        hub_portal.set_editor_property("linked_portal", biome_portal)
+        biome_portal.set_editor_property("linked_portal", hub_portal)
+        pairs.append((hub_portal, biome_portal))
+    return pairs
+
+
+def check_hub_portals(pairs):
+    cu.require(len(pairs) == len(BIOMES), "Faltan parejas de portales")
+    for hub_portal, biome_portal in pairs:
+        cu.require(hub_portal.get_editor_property("linked_portal") == biome_portal, f"{hub_portal.get_actor_label()} mal enlazado")
+        cu.require(biome_portal.get_editor_property("linked_portal") == hub_portal, f"{biome_portal.get_actor_label()} mal enlazado")
+        cu.require(hub_portal.get_editor_property("embedded") and biome_portal.get_editor_property("embedded"),
+                   "Los portales del hub van empotrados (decisión 3)")
+        distance = (hub_portal.get_actor_location() - biome_portal.get_actor_location()).length()
+        cu.require(distance > MIN_PAIR_DISTANCE, f"Pareja demasiado cerca ({distance:.0f} cm)")
+
+
+def build_hub_map(basic):
+    level_subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    hub_mats = build_hub_instances(basic)
+    biome_mats = build_biome_instances(basic)
+    if cu.EAL.does_asset_exist(HUB_MAP):
+        cu.require(cu.EAL.delete_asset(HUB_MAP), f"No se pudo borrar {HUB_MAP}")
+    cu.require(level_subsystem.new_level(HUB_MAP, False), f"No se pudo crear {HUB_MAP}")
+
+    world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+    world.get_world_settings().set_editor_property("force_no_precomputed_lighting", True)
+
+    hub = place_hub(actors, hub_mats)
+    biomes = place_biomes(actors, biome_mats, hub_mats["Wall"], hub)
+    pairs = place_hub_portals(actors, hub, biomes)
+    check_hub_portals(pairs)
+    place_lighting(actors)
+    place_post_process(actors)
+    cu.spawn(actors, unreal.PlayerStart, unreal.Vector(*HUB_PLAYER_START), "PlayerStart", 0.0)
+
+    cu.require(unreal.EditorLoadingAndSavingUtils.save_map(world, HUB_MAP), f"No se pudo guardar {HUB_MAP}")
+    count = len(actors.get_all_level_actors())
+    unreal.log(f"[LiminalContent] {HUB_MAP}: {count} actores, {2 * len(pairs)} portales")
+    assets = [mi.get_path_name() for mi in list(hub_mats.values()) + list(biome_mats.values())]
+    return count, 2 * len(pairs), assets
+
+
 def write_result(result):
     os.makedirs(os.path.dirname(RESULT_PATH), exist_ok=True)
     with open(RESULT_PATH, "w", encoding="utf-8") as f:
@@ -252,9 +404,12 @@ def main():
         basic = build_basic_material()
         mats = build_calibration_instances(basic)
         actor_count = build_calibration_map(mats)
-        result["assets"] = [surface.get_path_name(), fallback.get_path_name(), basic.get_path_name(), CALIBRATION_MAP]
-        result["assets"] += [mi.get_path_name() for mi in mats.values()]
+        hub_actors, hub_portals, hub_assets = build_hub_map(basic)
+        result["assets"] = [surface.get_path_name(), fallback.get_path_name(), basic.get_path_name(), CALIBRATION_MAP, HUB_MAP]
+        result["assets"] += [mi.get_path_name() for mi in mats.values()] + hub_assets
         result["calibrationActors"] = actor_count
+        result["hubActors"] = hub_actors
+        result["hubPortals"] = hub_portals
         result["ok"] = True
         unreal.log("[LiminalContent] OK")
     except Exception as error:  # noqa: BLE001 - se registra y se refleja en el JSON de resultado

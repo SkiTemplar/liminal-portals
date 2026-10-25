@@ -1,5 +1,6 @@
 #include "Portal/LiminalPortalSubsystem.h"
 
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "LiminalPortals.h"
@@ -20,6 +21,12 @@ namespace
 		TEXT("Liminal.Portal.LagFrames"),
 		0,
 		TEXT("Control negativo de calibración: captura con la pose de cámara de N fotogramas atrás (0 = sin retraso, máximo 4)."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<float> CVarDebugVelocityScale(
+		TEXT("Liminal.Portal.DebugVelocityScale"),
+		1.f,
+		TEXT("Control negativo de Liminal.SelfTest: escala la velocidad del pawn tras cada paso (1 = sin cambios)."),
 		ECVF_Default);
 
 	constexpr int32 MaxLagFrames = 4;
@@ -111,10 +118,24 @@ bool ULiminalPortalSubsystem::ProcessCrossings(APlayerController* PlayerControll
 		}
 
 		// Un solo cruce por fotograma: tras el paso la cámara queda delante del destino.
-		Character->TeleportThroughPortal(Portal->GetTransferToLinked());
+		FLiminalPortalTeleportEvent Event;
+		Event.Source = Portal;
+		Event.Target = Portal->LinkedPortal;
+		Event.Transfer = Portal->GetTransferToLinked();
+		Event.LocationBefore = Character->GetActorLocation();
+		Event.VelocityBefore = Character->GetCharacterMovement()->Velocity;
+		Event.CameraBefore = CameraLocation;
+		Character->TeleportThroughPortal(Event.Transfer);
+		const float DebugVelocityScale = CVarDebugVelocityScale.GetValueOnGameThread();
+		if (DebugVelocityScale != 1.f)
+		{
+			Character->GetCharacterMovement()->Velocity *= DebugVelocityScale;
+		}
+		Event.LocationAfter = Character->GetActorLocation();
+		Event.VelocityAfter = Character->GetCharacterMovement()->Velocity;
 		++TeleportCount;
 		UE_LOG(LogLiminalPortals, Verbose, TEXT("Cruce %s -> %s"), *Portal->GetName(), *Portal->LinkedPortal->GetName());
-		OnPortalTeleport.Broadcast(Portal, Portal->LinkedPortal);
+		OnPortalTeleport.Broadcast(Event);
 		return true;
 	}
 	return false;

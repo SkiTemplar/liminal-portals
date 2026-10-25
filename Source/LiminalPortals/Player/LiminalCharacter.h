@@ -31,6 +31,9 @@ public:
 
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 
+	/** Acción de movimiento (Axis2D: X = derecha, Y = delante); Liminal.SelfTest le inyecta entrada. */
+	const UInputAction* GetMoveAction() const { return MoveAction; }
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Liminal|Movement", meta = (ClampMin = "0.0"))
 	float WalkSpeed = 400.f;
 

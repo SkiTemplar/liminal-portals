@@ -9,7 +9,21 @@
 class ALiminalPortal;
 class APlayerController;
 
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLiminalPortalTeleport, ALiminalPortal* /*Source*/, ALiminalPortal* /*Target*/);
+/** Estado del pawn justo antes y justo después de un paso por portal (lo verifica Liminal.SelfTest). */
+struct FLiminalPortalTeleportEvent
+{
+	ALiminalPortal* Source = nullptr;
+	ALiminalPortal* Target = nullptr;
+	FTransform Transfer = FTransform::Identity;
+	FVector LocationBefore = FVector::ZeroVector;
+	FVector LocationAfter = FVector::ZeroVector;
+	FVector VelocityBefore = FVector::ZeroVector;
+	FVector VelocityAfter = FVector::ZeroVector;
+	/** Cámara del fotograma que detectó el cruce (ya detrás del plano de Source). */
+	FVector CameraBefore = FVector::ZeroVector;
+};
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnLiminalPortalTeleport, const FLiminalPortalTeleportEvent& /*Event*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLiminalPortalsUpdated, const FMinimalViewInfo& /*FinalView*/);
 
 /**

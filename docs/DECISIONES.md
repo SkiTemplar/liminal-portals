@@ -202,3 +202,94 @@ Las que surjan durante la implementación se añaden aquí con este formato:
 - **Alternativas**: máscara renderizada (tercera pasada con material plano); métrica en luminancia.
 - **Motivo**: la máscara geométrica no depende del render que se mide y el polígono es comprobable.
 - **Cómo revertir**: `Debug/LiminalCalibration.*`, `Tools/Verify/compare_calibration.py`.
+
+### D-16 · Hub en pasillo con cuatro puertas al tresbolillo
+
+- **Contexto**: el plan pide «pasillo o sala liminal» con cuatro huecos del tamaño del portal.
+- **Elegida**: sala cerrada de 16 × 6 × 3,2 m (interior), paredes de 20 cm, moqueta y techo de
+  10 cm y cuatro paneles fluorescentes de 120 × 60 cm con una `RectLight` de 40 nits cada uno.
+  Puertas de 140 × 230 cm (cápsula de 68 cm: 36 cm de holgura por lado) con marco de 12 cm, dos en
+  cada pared larga y alternadas: X = −500 y +100 en la pared de +Y, −100 y +500 en la de −Y. El plano
+  del portal queda en la cara interior de la pared; el túnel del marco y la placa trasera (70 cm)
+  sobresalen por fuera del hub, donde no se ven. El hueco de la pared es el exterior del marco.
+- **Alternativas**: puertas en los extremos (se ven todas a la vez y una tapa a otra); portal de
+  120 cm (26 cm de holgura, más roces con los montantes); pared de 70 cm que contenga el túnel.
+- **Motivo**: el pasillo es el arquetipo liminal y las puertas alternadas no se miran de frente.
+  Con 100 nits la vista general salía quemada (luminancia media 221/255); con 40, 185.
+- **Cómo revertir**: propiedades de `ALiminalHub` y `MakeDefaultHubDoors` en `World/LiminalWorldLayout.cpp`;
+  volver a generar `L_Hub` con `Tools/content.ps1`.
+
+### D-17 · Geometría de blockout con ISM regenerados en OnConstruction
+
+- **Contexto**: hub y biomas se generan por código; hay que decidir con qué componentes.
+- **Elegida**: un `UInstancedStaticMeshComponent` de cubos del motor por material (paredes,
+  moqueta, techo, paneles), creados en el constructor y rellenados en `OnConstruction` desde la
+  geometría pura de `LiminalWorldLayout`. Las `RectLight` son cuatro subobjetos fijos. Las
+  instancias quedan guardadas en el mapa: en `-game` no se vuelve a ejecutar `OnConstruction`, así
+  que **un cambio de layout en C++ exige regenerar `L_Hub`**. Sin navegación en esos ISM: en UE 5.6
+  `AddInstance` en un mundo de juego invalida la caché de límites y el sistema de navegación la lee
+  antes de recalcularla (`ensure` en `GetNavigationBounds`). `M_Basic` lleva
+  `bUsedWithInstancedStaticMeshes` (sin él, el juego usaba el material por defecto).
+- **Alternativas**: componentes creados en `OnConstruction` con `CreationMethod = UserConstructionScript`
+  (más frágil de serializar); `UProceduralMeshComponent` (innecesario para cajas).
+- **Motivo**: un solo camino de datos (layout puro → cajas) y cero assets propios.
+- **Cómo revertir**: `World/LiminalBlockout.*`, `World/LiminalHub.*`, `World/LiminalBiome.*`.
+
+### D-18 · Bioma: origen en la puerta de vuelta y pared exenta fina
+
+- **Contexto**: el plan fija la pared exenta con la puerta de vuelta, no sus medidas.
+- **Elegida**: el origen de `ALiminalBiome` es el de su portal de vuelta (eje X hacia el bioma) y el
+  suelo, de 400 × 400 m, tiene la cara superior en Z = 0 (paso de suelo a suelo, D-01). Pared de
+  6 × 3,5 m y 20 cm, en X ∈ [−20, 0]; el túnel del portal sobresale 50 cm por detrás. Colores de
+  suelo por tipo en `ALiminalBiome::GetBiomeBaseColor` (el script de contenido crea `MI_Biome_*` con
+  ellos). Biomas en k × 20 km con k = 1..4 en el orden selva, desierto, Antártida y cultivos, y
+  semillas 1001-1004. La generación de E4 entra por `BuildProceduralContent(FRandomStream&)`.
+- **Alternativas**: pared de 80 cm que esconda el túnel (deja un rebaje de 10 cm por detrás).
+- **Motivo**: blockout simple; la vista por detrás de la pared no forma parte de ninguna prueba.
+- **Observación**: el sol (el de la calibración) viene de −X: desde el hub se ve el bioma de cara
+  al sol en la espalda, y la cara frontal de la pared exenta queda en su propia sombra. Se revisa
+  con la iluminación por bioma (riesgo 1).
+- **Cómo revertir**: `World/LiminalBiome.*`, `BIOMES` en `Tools/Content/build_content.py`.
+
+### D-19 · Método de Liminal.SelfTest
+
+- **Contexto**: el plan pide 20 cruces hub → bioma → hub por puerta con entrada simulada o
+  velocidad impuesta, sin teletransporte manual.
+- **Elegida**: entrada simulada con `UEnhancedInputLocalPlayerSubsystem::InjectInputForAction` en
+  la acción de movimiento del personaje, cada fotograma; la dirección se fija con la rotación de
+  control (la entrada de mirada real se ignora durante la prueba). Al empezar cada puerta se coloca
+  al jugador 3 m delante (es preparación, no un cruce: se vacía el historial de cámara). Ciclo:
+  camina hacia el centro del hueco, cruza, se aleja 1,5 m del portal de salida, da media vuelta y
+  vuelve a cruzar. Paso fijo de 1/60 s (`-UseFixedTimeStep -FPS=60`) para que el movimiento no
+  dependa de la velocidad de render. Comprobaciones por cruce (`LiminalSelfTestMath`, independientes
+  de `MakeTransfer`: coordenadas locales (x, y, z) ↔ (−x, −y, z)): portales esperados, salto > 1 km,
+  módulo de la velocidad (1 %), dirección (0,5°), posición (1 cm), cámara por delante del destino y
+  velocidad del fotograma siguiente ≥ 99 %. En cada fotograma: cámara fuera del volumen de detrás
+  de cada portal (hueco + marco, hasta la placa + 1 m) y sin solapar geometría (esfera de 5 cm en
+  `ECC_Camera`). El subsistema emite ahora `FLiminalPortalTeleportEvent` (estado antes y después).
+- **Control negativo**: `Liminal.Portal.DebugVelocityScale 0.97` (escala la velocidad tras cada
+  paso) hace fallar las cuatro puertas con un 3 % de error (`verify.ps1 -SelfTest -SelfTestNegative`).
+- **Resultado**: 80 cruces por sentido, error de velocidad 1,4e-14 %, dirección 1,2e-6°, posición
+  2e-9 cm, cámara 1,2-4,2 cm por delante del destino tras el paso, 0 fotogramas con la cámara detrás
+  de un portal o dentro de geometría (9141 fotogramas).
+- **Alternativas**: imponer `Velocity` al `CharacterMovement` (se salta el camino de entrada real);
+  `AddMovementInput` directo (no pasa por Enhanced Input).
+- **Cómo revertir**: `Debug/LiminalSelfTest.*`, `Debug/LiminalSelfTestMath.*`.
+
+### D-20 · Liminal.Tour y criterio de «no negra»
+
+- **Contexto**: hay que comprobar por script que las capturas no son negras.
+- **Elegida**: nueve capturas (vista general del hub y, por puerta, desde 3,5 m en el hub y desde
+  4,5 m en el bioma, mirando al centro del hueco), con 90 fotogramas de espera para TSR y Lumen.
+  `Tools/Verify/check_tour.py` exige luminancia media (Rec. 709 sobre sRGB) entre 15 y 245 en la
+  imagen completa y en el recuadro central del 20 % (donde queda la puerta). Medido: medias de 110 a
+  185 y centros de 171 a 232.
+- **Alternativas**: comparar con imágenes de referencia (frágil ante cambios de iluminación).
+- **Cómo revertir**: `Debug/LiminalTour.*`, `Tools/Verify/check_tour.py`.
+
+### D-21 · L_Hub también como mapa de arranque del editor
+
+- **Contexto**: D-08 dejó `EditorStartupMap` sin fijar hasta que existiera `L_Hub`.
+- **Elegida**: `EditorStartupMap=/Game/Maps/L_Hub.L_Hub`. Los tests (`Tools/test.ps1`) siguen en
+  verde y tardan lo mismo (17 s).
+- **Cómo revertir**: `Config/DefaultEngine.ini`.

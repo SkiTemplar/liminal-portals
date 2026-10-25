@@ -116,6 +116,8 @@ powershell -File Tools/build.ps1 -Target Game     # juego
 powershell -File Tools/test.ps1                   # Automation Tests sin interfaz
 powershell -File Tools/content.ps1                # materiales y mapas por script (Tools/Content)
 powershell -File Tools/verify.ps1 -Calibrate      # calibración del portal con RHI (fase 1)
+powershell -File Tools/verify.ps1 -SelfTest [-SelfTestNegative]   # cruces hub <-> bioma (fases 2 y 3)
+powershell -File Tools/verify.ps1 -Tour           # capturas del hub y de cada puerta en Saved/Tour/
 ```
 
 ### Calibración del portal (fase 1)
@@ -135,6 +137,28 @@ máscara (`Tools/Verify/compare_calibration.py`, resultado en `Saved/Calibration
 
 Aceptación: < 2 % sin retraso y > 3 veces ese valor con retraso. FXAA y TAA dan lo mismo que TSR;
 el residuo es de Lumen (con Lumen apagado, 0,26 %).
+
+### Hub, cruce y biomas en blockout (fases 2 y 3)
+
+`/Game/Maps/L_Hub` (mapa por defecto) lo genera `Tools/content.ps1`: `ALiminalHub` en el origen (pasillo
+cerrado de 16 × 6 × 3,2 m, moqueta, paneles fluorescentes con `RectLight` y cuatro puertas de
+140 × 230 cm al tresbolillo), cuatro `ALiminalBiome` en k × 20 km (selva, desierto, Antártida y
+cultivos: suelo de color y pared exenta con la puerta de vuelta) y ocho portales enlazados por parejas.
+La geometría sale de funciones puras (`World/LiminalWorldLayout`) y se regenera en `OnConstruction`;
+un cambio de layout en C++ exige volver a generar el mapa (ver `docs/DECISIONES.md`, D-16 a D-18).
+
+`Liminal.SelfTest [Ciclos]` cruza cada puerta ida y vuelta con entrada simulada (Enhanced Input
+inyectado) y paso fijo de 1/60 s, y escribe `Saved/SelfTest.json`; `Liminal.Tour` guarda nueve
+capturas en `Saved/Tour/` y `Tools/Verify/check_tour.py` comprueba que no son negras.
+
+| Medida (1280×720, paso fijo 1/60 s) | Resultado |
+|---|---|
+| Cruces por sentido (4 puertas × 20) | 80 hub → bioma y 80 bioma → hub, todos correctos |
+| Error máximo del módulo de la velocidad | 1,4e-14 % (tolerancia 1 %) |
+| Error máximo de dirección / posición | 1,2e-6° / 2e-9 cm |
+| Fotogramas con la cámara detrás de un portal o dentro de geometría | 0 de 9141 |
+| Control negativo (velocidad al 97 % tras el paso) | falla en las 4 puertas (3 %) |
+| Luminancia media de las capturas del Tour (0-255) | 110-185; recuadro central 171-232 |
 
 Con el editor abierto, la compilación por línea de comandos falla por Live Coding: cerrarlo antes.
 La primera vez, clic derecho en `LiminalPortals.uproject` → *Generate Visual Studio project files*.

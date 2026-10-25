@@ -1,6 +1,8 @@
 #include "Debug/LiminalDebugCommands.h"
 
 #include "Debug/LiminalCalibration.h"
+#include "Debug/LiminalSelfTest.h"
+#include "Debug/LiminalTour.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/IConsoleManager.h"
@@ -19,6 +21,10 @@ namespace
 
 	/** Ejecución en curso o la última terminada (se sustituye al lanzar otra). */
 	TUniquePtr<FLiminalCalibrationRun> GCalibrationRun;
+	TUniquePtr<FLiminalSelfTestRun> GSelfTestRun;
+	TUniquePtr<FLiminalTourRun> GTourRun;
+
+	constexpr int32 MaxSelfTestCycles = 1000;
 
 	/** El mundo que pasa la consola puede ser nulo con -ExecCmds: se busca el primer mundo de juego. */
 	UWorld* ResolveGameWorld(UWorld* World)
@@ -51,6 +57,41 @@ namespace
 			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Calibrate: %s"), *Error);
 		}
 	}
+
+	void RunSelfTestCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		int32 Cycles = FLiminalSelfTestRun::FConfig().CyclesPerDoor;
+		if (!Args.IsEmpty() && !LexTryParseString(Cycles, *Args[0]))
+		{
+			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.SelfTest: '%s' no es un número de ciclos"), *Args[0]);
+			return;
+		}
+		FString Error;
+		if (!LiminalDebugCommands::StartSelfTest(World, Cycles, Error))
+		{
+			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.SelfTest: %s"), *Error);
+		}
+	}
+
+	void RunTourCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		FString Error;
+		if (!LiminalDebugCommands::StartTour(World, Error))
+		{
+			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Tour: %s"), *Error);
+		}
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs SelfTestCommand(
+		TEXT("Liminal.SelfTest"),
+		TEXT("Cruza cada puerta del hub ida y vuelta N veces (20 por defecto) con entrada simulada y comprueba ")
+		TEXT("teletransporte, velocidad y cámara; escribe Saved/SelfTest.json y sale. Uso: Liminal.SelfTest [Ciclos]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSelfTestCommand));
+
+	FAutoConsoleCommandWithWorldAndArgs TourCommand(
+		TEXT("Liminal.Tour"),
+		TEXT("Capturas del hub y de cada puerta (desde el hub y desde el bioma) en Saved/Tour/ y sale."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunTourCommand));
 
 	FAutoConsoleCommandWithWorldAndArgs CalibrateCommand(
 		TEXT("Liminal.Calibrate"),
@@ -111,6 +152,66 @@ namespace LiminalDebugCommands
 			return false;
 		}
 		GCalibrationRun = MoveTemp(Run);
+		return true;
+	}
+
+	bool StartSelfTest(UWorld* World, int32 CyclesPerDoor, FString& OutError)
+	{
+		if (GSelfTestRun && !GSelfTestRun->IsFinished())
+		{
+			OutError = TEXT("ya hay una prueba en curso");
+			return false;
+		}
+		if (CyclesPerDoor <= 0 || CyclesPerDoor > MaxSelfTestCycles)
+		{
+			OutError = FString::Printf(TEXT("ciclos fuera de rango (1-%d): %d"), MaxSelfTestCycles, CyclesPerDoor);
+			return false;
+		}
+		UWorld* GameWorld = ResolveGameWorld(World);
+		if (!GameWorld)
+		{
+			OutError = TEXT("no hay mundo de juego");
+			return false;
+		}
+
+		FLiminalSelfTestRun::FConfig Config;
+		Config.OutputPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SelfTest.json")));
+		Config.CyclesPerDoor = CyclesPerDoor;
+
+		GSelfTestRun.Reset();
+		TUniquePtr<FLiminalSelfTestRun> Run = MakeUnique<FLiminalSelfTestRun>(GameWorld, Config);
+		if (!Run->Start(OutError))
+		{
+			return false;
+		}
+		GSelfTestRun = MoveTemp(Run);
+		return true;
+	}
+
+	bool StartTour(UWorld* World, FString& OutError)
+	{
+		if (GTourRun && !GTourRun->IsFinished())
+		{
+			OutError = TEXT("ya hay un recorrido en curso");
+			return false;
+		}
+		UWorld* GameWorld = ResolveGameWorld(World);
+		if (!GameWorld)
+		{
+			OutError = TEXT("no hay mundo de juego");
+			return false;
+		}
+
+		FLiminalTourRun::FConfig Config;
+		Config.OutputDir = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Tour")));
+
+		GTourRun.Reset();
+		TUniquePtr<FLiminalTourRun> Run = MakeUnique<FLiminalTourRun>(GameWorld, Config);
+		if (!Run->Start(OutError))
+		{
+			return false;
+		}
+		GTourRun = MoveTemp(Run);
 		return true;
 	}
 }
