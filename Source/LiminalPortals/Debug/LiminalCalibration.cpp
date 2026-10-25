@@ -1,6 +1,7 @@
 #include "Debug/LiminalCalibration.h"
 
 #include "Debug/LiminalCalibrationMath.h"
+#include "Debug/LiminalDebugShared.h"
 #include "Dom/JsonObject.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
@@ -28,8 +29,6 @@ namespace
 	constexpr int32 NumPasses = 2;
 	/** Tolerancia al comparar la rotación de la vista con la esperada, en grados. */
 	constexpr double RotationTolerance = 0.01;
-	/** Ticks del motor sin UpdatePortals tras los que se aborta (el subsistema no corre). */
-	constexpr int32 MaxTicksWithoutUpdate = 600;
 
 	int32 GetIntCVar(const TCHAR* Name, int32 Fallback)
 	{
@@ -41,16 +40,6 @@ namespace
 	{
 		const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
 		return Variable ? Variable->GetFloat() : Fallback;
-	}
-
-	TArray<TSharedPtr<FJsonValue>> ToJsonArray(std::initializer_list<double> Values)
-	{
-		TArray<TSharedPtr<FJsonValue>> Array;
-		for (const double Value : Values)
-		{
-			Array.Add(MakeShared<FJsonValueNumber>(Value));
-		}
-		return Array;
 	}
 }
 
@@ -117,7 +106,7 @@ bool FLiminalCalibrationRun::OnWatchdogTick(float DeltaTime)
 	{
 		return false;
 	}
-	if (++TicksWithoutUpdate > MaxTicksWithoutUpdate)
+	if (++TicksWithoutUpdate > LiminalDebugShared::MaxTicksWithoutUpdate)
 	{
 		Finish(TEXT("ULiminalPortalSubsystem no actualiza: ¿hay PlayerController local y Liminal.Portals.Enable 1?"));
 		return false;
@@ -448,8 +437,8 @@ bool FLiminalCalibrationRun::WriteReport(const FString& Error) const
 	Root->SetNumberField(TEXT("savedScreenshots"), SavedScreenshots);
 	Root->SetNumberField(TEXT("maxProjectionErrorPx"), MaxProjectionErrorPx);
 	Root->SetNumberField(TEXT("maxCameraDriftCm"), MaxCameraDriftCm);
-	Root->SetArrayField(TEXT("viewport"), ToJsonArray({ static_cast<double>(ViewportSize.X), static_cast<double>(ViewportSize.Y) }));
-	Root->SetArrayField(TEXT("screenshotSize"), ToJsonArray({ static_cast<double>(ScreenshotSize.X), static_cast<double>(ScreenshotSize.Y) }));
+	Root->SetArrayField(TEXT("viewport"), LiminalDebugShared::ToJsonArray({ static_cast<double>(ViewportSize.X), static_cast<double>(ViewportSize.Y) }));
+	Root->SetArrayField(TEXT("screenshotSize"), LiminalDebugShared::ToJsonArray({ static_cast<double>(ScreenshotSize.X), static_cast<double>(ScreenshotSize.Y) }));
 
 	TArray<TSharedPtr<FJsonValue>> FrameValues;
 	for (const FFrameRecord& Frame : Frames)
@@ -458,11 +447,11 @@ bool FLiminalCalibrationRun::WriteReport(const FString& Error) const
 		FrameObject->SetStringField(TEXT("pass"), PassNames[Frame.Pass]);
 		FrameObject->SetNumberField(TEXT("index"), Frame.Index);
 		FrameObject->SetNumberField(TEXT("yawOffset"), Frame.YawOffset);
-		FrameObject->SetArrayField(TEXT("rotation"), ToJsonArray({ Frame.Rotation.Pitch, Frame.Rotation.Yaw, Frame.Rotation.Roll }));
+		FrameObject->SetArrayField(TEXT("rotation"), LiminalDebugShared::ToJsonArray({ Frame.Rotation.Pitch, Frame.Rotation.Yaw, Frame.Rotation.Roll }));
 		TArray<TSharedPtr<FJsonValue>> CornerValues;
 		for (const FVector2D& Corner : Frame.Corners)
 		{
-			CornerValues.Add(MakeShared<FJsonValueArray>(ToJsonArray({ Corner.X, Corner.Y })));
+			CornerValues.Add(MakeShared<FJsonValueArray>(LiminalDebugShared::ToJsonArray({ Corner.X, Corner.Y })));
 		}
 		FrameObject->SetArrayField(TEXT("corners"), CornerValues);
 		FrameValues.Add(MakeShared<FJsonValueObject>(FrameObject));

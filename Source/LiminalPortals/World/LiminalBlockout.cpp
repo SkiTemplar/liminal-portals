@@ -6,11 +6,6 @@
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
 
-namespace
-{
-	constexpr double CubeSize = 100.0;
-}
-
 namespace LiminalBlockout
 {
 	UInstancedStaticMeshComponent* CreateBoxes(AActor* Owner, FName Name, USceneComponent* Parent, UStaticMesh* Mesh)

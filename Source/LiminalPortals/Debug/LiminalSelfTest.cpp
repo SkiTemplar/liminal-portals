@@ -1,6 +1,7 @@
 #include "Debug/LiminalSelfTest.h"
 
 #include "CollisionQueryParams.h"
+#include "Debug/LiminalDebugShared.h"
 #include "Dom/JsonObject.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
@@ -23,7 +24,6 @@
 
 namespace
 {
-	constexpr int32 MaxTicksWithoutUpdate = 600;
 	constexpr int32 MaxGroundingFrames = 300;
 	/** Errores de detalle que se guardan por puerta (el recuento va aparte). */
 	constexpr int32 MaxErrorsPerDoor = 8;
@@ -96,7 +96,7 @@ bool FLiminalSelfTestRun::OnWatchdogTick(float DeltaTime)
 	{
 		return false;
 	}
-	if (++TicksWithoutUpdate > MaxTicksWithoutUpdate)
+	if (++TicksWithoutUpdate > LiminalDebugShared::MaxTicksWithoutUpdate)
 	{
 		Finish(TEXT("ULiminalPortalSubsystem no actualiza: ¿hay PlayerController local y Liminal.Portals.Enable 1?"));
 		return false;

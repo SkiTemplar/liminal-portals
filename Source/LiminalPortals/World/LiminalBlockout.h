@@ -13,6 +13,8 @@ namespace LiminalBlockout
 {
 	/** Ruta del cubo básico del motor: 100 cm de lado, centrado en su origen. */
 	inline constexpr const TCHAR* CubeMeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
+	/** Lado del cubo básico del motor, en cm. */
+	inline constexpr double CubeSize = 100.0;
 
 	/** Crea en el constructor un ISM de cubos con colisión de bloqueo; Mesh puede ser nulo. */
 	UInstancedStaticMeshComponent* CreateBoxes(AActor* Owner, FName Name, USceneComponent* Parent, UStaticMesh* Mesh);

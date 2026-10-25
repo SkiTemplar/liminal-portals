@@ -293,3 +293,21 @@ Las que surjan durante la implementación se añaden aquí con este formato:
 - **Elegida**: `EditorStartupMap=/Game/Maps/L_Hub.L_Hub`. Los tests (`Tools/test.ps1`) siguen en
   verde y tardan lo mismo (17 s).
 - **Cómo revertir**: `Config/DefaultEngine.ini`.
+
+### D-22 · Unity build completo: sin símbolos repetidos en namespaces anónimos
+
+- **Contexto**: tras d406fff el árbol limpio no compilaba (C2374/C2084 por `MaxTicksWithoutUpdate`,
+  `ToJsonArray` y `CubeSize` repetidos en namespaces anónimos; C4459 porque los fixtures globales
+  `PortalA`/`PortalB` de `LiminalPortalMathTests.cpp`, visibles por `using namespace`, ocultaban
+  locales de `LiminalPortalWorldTests.cpp`). UBT junta los 26 .cpp del módulo en un solo
+  `Module.LiminalPortals.cpp`; el adaptive unity saca de él los ficheros modificados según git, y por
+  eso el build con cambios sin commitear salía en verde.
+- **Elegida**: `MaxTicksWithoutUpdate` y `ToJsonArray` pasan a `Debug/LiminalDebugShared.h`
+  (namespace `LiminalDebugShared`); `CubeSize` a `LiminalBlockout.h`; los fixtures se renombran a
+  `FixturePortalA`/`FixturePortalB`. `Tools/build.ps1` pasa `-DisableAdaptiveUnity` para compilar
+  siempre el unity completo, sea cual sea el estado de git. Se mantiene el unity build (más rápido).
+- **Alternativas**: `bUseUnity = false` en `LiminalPortals.Build.cs` (oculta el problema a costa de
+  tiempo de compilación).
+- **Regla**: un símbolo de namespace anónimo debe ser único en el módulo; lo compartido va a un
+  header con namespace propio.
+- **Cómo revertir**: quitar `-DisableAdaptiveUnity` de `Tools/build.ps1`.

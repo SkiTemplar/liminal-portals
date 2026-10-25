@@ -1,5 +1,6 @@
 #include "Debug/LiminalTour.h"
 
+#include "Debug/LiminalDebugShared.h"
 #include "Debug/LiminalDebugWorld.h"
 #include "Dom/JsonObject.h"
 #include "Engine/GameViewportClient.h"
@@ -21,22 +22,11 @@
 
 namespace
 {
-	constexpr int32 MaxTicksWithoutUpdate = 600;
 	/** Fotogramas que se espera a que llegue una captura pedida antes de abortar. */
 	constexpr int32 MaxScreenshotWaitFrames = 10;
 	/** La vista general se toma desde 1,2 m del fondo de la sala, mirando a lo largo de ella. */
 	constexpr double OverviewInsetCm = 120.0;
 	constexpr double OverviewPitch = -6.0;
-
-	TArray<TSharedPtr<FJsonValue>> ToJsonArray(std::initializer_list<double> Values)
-	{
-		TArray<TSharedPtr<FJsonValue>> Array;
-		for (const double Value : Values)
-		{
-			Array.Add(MakeShared<FJsonValueNumber>(Value));
-		}
-		return Array;
-	}
 
 	FRotator LookAt(const FVector& From, const FVector& To)
 	{
@@ -93,7 +83,7 @@ bool FLiminalTourRun::OnWatchdogTick(float DeltaTime)
 	{
 		return false;
 	}
-	if (++TicksWithoutUpdate > MaxTicksWithoutUpdate)
+	if (++TicksWithoutUpdate > LiminalDebugShared::MaxTicksWithoutUpdate)
 	{
 		Finish(TEXT("ULiminalPortalSubsystem no actualiza: ¿hay PlayerController local y Liminal.Portals.Enable 1?"));
 		return false;
@@ -315,8 +305,8 @@ bool FLiminalTourRun::WriteReport(const FString& Error) const
 		Object->SetStringField(TEXT("name"), Shot.Name);
 		Object->SetStringField(TEXT("file"), FPaths::GetCleanFilename(Shot.Path));
 		Object->SetBoolField(TEXT("saved"), Shot.bSaved);
-		Object->SetArrayField(TEXT("viewLocation"), ToJsonArray({ Shot.ViewLocation.X, Shot.ViewLocation.Y, Shot.ViewLocation.Z }));
-		Object->SetArrayField(TEXT("viewRotation"), ToJsonArray({ Shot.ViewRotation.Pitch, Shot.ViewRotation.Yaw, Shot.ViewRotation.Roll }));
+		Object->SetArrayField(TEXT("viewLocation"), LiminalDebugShared::ToJsonArray({ Shot.ViewLocation.X, Shot.ViewLocation.Y, Shot.ViewLocation.Z }));
+		Object->SetArrayField(TEXT("viewRotation"), LiminalDebugShared::ToJsonArray({ Shot.ViewRotation.Pitch, Shot.ViewRotation.Yaw, Shot.ViewRotation.Roll }));
 		ShotValues.Add(MakeShared<FJsonValueObject>(Object));
 	}
 
@@ -324,7 +314,7 @@ bool FLiminalTourRun::WriteReport(const FString& Error) const
 	Root->SetBoolField(TEXT("complete"), Error.IsEmpty() && !Shots.IsEmpty() && Saved == Shots.Num());
 	Root->SetStringField(TEXT("error"), Error);
 	Root->SetNumberField(TEXT("settleFrames"), Config.SettleFrames);
-	Root->SetArrayField(TEXT("screenshotSize"), ToJsonArray({ static_cast<double>(ScreenshotSize.X), static_cast<double>(ScreenshotSize.Y) }));
+	Root->SetArrayField(TEXT("screenshotSize"), LiminalDebugShared::ToJsonArray({ static_cast<double>(ScreenshotSize.X), static_cast<double>(ScreenshotSize.Y) }));
 	Root->SetArrayField(TEXT("shots"), ShotValues);
 
 	FString Json;

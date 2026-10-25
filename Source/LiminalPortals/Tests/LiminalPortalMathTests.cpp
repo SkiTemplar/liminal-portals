@@ -16,8 +16,8 @@ namespace LiminalPortalMathTests
 	}
 
 	/** Portal de origen en el hub y destino a 20 km girado 90°. */
-	const FTransform PortalA = MakePortal(FVector(0.0, 0.0, 0.0), 0.0);
-	const FTransform PortalB = MakePortal(FVector(20000.0, 500.0, 100.0), 90.0);
+	const FTransform FixturePortalA = MakePortal(FVector(0.0, 0.0, 0.0), 0.0);
+	const FTransform FixturePortalB = MakePortal(FVector(20000.0, 500.0, 100.0), 90.0);
 
 	bool SameRotation(const FQuat& A, const FQuat& B)
 	{
@@ -54,19 +54,19 @@ bool FLiminalTransferCoincidentTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferFrontToFrontTest, "LiminalPortals.Math.Transfer.FrontMapsBehindTarget", PortalMathTestFlags)
 bool FLiminalTransferFrontToFrontTest::RunTest(const FString& Parameters)
 {
-	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
+	const FTransform Transfer = MakeTransfer(FixturePortalA, FixturePortalB);
 	// La cámara a 100 cm delante de A aparece 100 cm detrás de B y mira hacia fuera de su cara frontal.
-	const FVector InFrontOfA = PortalA.TransformPosition(FVector(100.0, 20.0, 150.0));
+	const FVector InFrontOfA = FixturePortalA.TransformPosition(FVector(100.0, 20.0, 150.0));
 	const FVector Mapped = TransferPoint(Transfer, InFrontOfA);
-	TestNearlyEqual(TEXT("Distancia a B"), SignedDistanceToPlane(PortalB, Mapped), -100.0, PositionTolerance);
+	TestNearlyEqual(TEXT("Distancia a B"), SignedDistanceToPlane(FixturePortalB, Mapped), -100.0, PositionTolerance);
 
-	const FVector LookIntoA = -PortalA.GetUnitAxis(EAxis::X);
+	const FVector LookIntoA = -FixturePortalA.GetUnitAxis(EAxis::X);
 	const FVector MappedLook = TransferVector(Transfer, LookIntoA);
-	TestTrue(TEXT("Mira hacia fuera de B"), MappedLook.Equals(PortalB.GetUnitAxis(EAxis::X), PositionTolerance));
+	TestTrue(TEXT("Mira hacia fuera de B"), MappedLook.Equals(FixturePortalB.GetUnitAxis(EAxis::X), PositionTolerance));
 
 	// Negativo: un punto detrás de A queda delante de B (por eso solo cuenta el cruce frontal).
-	const FVector BehindA = PortalA.TransformPosition(FVector(-50.0, 0.0, 150.0));
-	TestTrue(TEXT("Detrás de A ⇒ delante de B"), SignedDistanceToPlane(PortalB, TransferPoint(Transfer, BehindA)) > 0.0);
+	const FVector BehindA = FixturePortalA.TransformPosition(FVector(-50.0, 0.0, 150.0));
+	TestTrue(TEXT("Detrás de A ⇒ delante de B"), SignedDistanceToPlane(FixturePortalB, TransferPoint(Transfer, BehindA)) > 0.0);
 	return true;
 }
 
@@ -91,7 +91,7 @@ bool FLiminalTransferRoundTripTest::RunTest(const FString& Parameters)
 	}
 
 	// Negativo: aplicar dos veces A→B no devuelve al origen.
-	const FTransform There = MakeTransfer(PortalA, PortalB);
+	const FTransform There = MakeTransfer(FixturePortalA, FixturePortalB);
 	const FVector Point(100.0, 0.0, 150.0);
 	TestFalse(TEXT("A→B dos veces ≠ identidad"), TransferPoint(There, TransferPoint(There, Point)).Equals(Point, 1.0));
 	return true;
@@ -100,7 +100,7 @@ bool FLiminalTransferRoundTripTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferVelocityTest, "LiminalPortals.Math.Transfer.VelocityPreservedAndRotated", PortalMathTestFlags)
 bool FLiminalTransferVelocityTest::RunTest(const FString& Parameters)
 {
-	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
+	const FTransform Transfer = MakeTransfer(FixturePortalA, FixturePortalB);
 	// Andar hacia A (−X) sale por la cara frontal de B, que mira a +Y.
 	const FVector Velocity(-300.0, 0.0, -50.0);
 	const FVector Mapped = TransferVector(Transfer, Velocity);
@@ -117,12 +117,12 @@ bool FLiminalTransferVelocityTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferScaleTest, "LiminalPortals.Math.Transfer.IgnoresPortalScale", PortalMathTestFlags)
 bool FLiminalTransferScaleTest::RunTest(const FString& Parameters)
 {
-	FTransform ScaledA = PortalA;
+	FTransform ScaledA = FixturePortalA;
 	ScaledA.SetScale3D(FVector(2.0, 3.0, 0.5));
-	FTransform ScaledB = PortalB;
+	FTransform ScaledB = FixturePortalB;
 	ScaledB.SetScale3D(FVector(4.0));
 	const FVector Point(80.0, -30.0, 120.0);
-	const FVector Expected = TransferPoint(MakeTransfer(PortalA, PortalB), Point);
+	const FVector Expected = TransferPoint(MakeTransfer(FixturePortalA, FixturePortalB), Point);
 	TestTrue(TEXT("La escala no cambia el paso"), TransferPoint(MakeTransfer(ScaledA, ScaledB), Point).Equals(Expected, PositionTolerance));
 
 	// Negativo: la composición ingenua con escala sí se deforma.
@@ -135,7 +135,7 @@ bool FLiminalTransferScaleTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTransferTransformTest, "LiminalPortals.Math.Transfer.TransformMatchesParts", PortalMathTestFlags)
 bool FLiminalTransferTransformTest::RunTest(const FString& Parameters)
 {
-	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
+	const FTransform Transfer = MakeTransfer(FixturePortalA, FixturePortalB);
 	const FTransform Camera(FRotator(-10.0, 170.0, 0.0), FVector(150.0, 10.0, 160.0), FVector(1.0, 1.0, 1.0));
 	const FTransform Mapped = TransferTransform(Transfer, Camera);
 	TestTrue(TEXT("Posición"), Mapped.GetLocation().Equals(TransferPoint(Transfer, Camera.GetLocation()), PositionTolerance));
@@ -150,7 +150,7 @@ bool FLiminalTransferTransformTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalControlRotationTest, "LiminalPortals.Math.ControlRotation.YawPitchKept", PortalMathTestFlags)
 bool FLiminalControlRotationTest::RunTest(const FString& Parameters)
 {
-	const FTransform Transfer = MakeTransfer(PortalA, PortalB);
+	const FTransform Transfer = MakeTransfer(FixturePortalA, FixturePortalB);
 	const FRotator Control(20.0, 180.0, 0.0);
 	const FRotator Mapped = TransferControlRotation(Transfer, Control);
 	// Mirando hacia A (yaw 180) se sale de B mirando a su frontal (yaw 90); el pitch no cambia.
@@ -168,7 +168,7 @@ bool FLiminalControlRollTest::RunTest(const FString& Parameters)
 {
 	// Destino ladeado: la rotación completa tendría roll, la de control no.
 	const FTransform Tilted = MakePortal(FVector(5000.0, 0.0, 0.0), 45.0, 0.0, 30.0);
-	const FTransform Transfer = MakeTransfer(PortalA, Tilted);
+	const FTransform Transfer = MakeTransfer(FixturePortalA, Tilted);
 	const FRotator Control(10.0, 170.0, 0.0);
 	const FRotator Mapped = TransferControlRotation(Transfer, Control);
 	TestNearlyEqual(TEXT("Roll 0"), Mapped.Roll, 0.0, 1e-6);
@@ -185,10 +185,10 @@ bool FLiminalControlRollTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalSignedDistanceTest, "LiminalPortals.Math.Plane.SignedDistance", PortalMathTestFlags)
 bool FLiminalSignedDistanceTest::RunTest(const FString& Parameters)
 {
-	TestNearlyEqual(TEXT("Delante de B"), SignedDistanceToPlane(PortalB, PortalB.TransformPosition(FVector(25.0, 40.0, 10.0))), 25.0, PositionTolerance);
-	TestNearlyEqual(TEXT("Sobre el plano"), SignedDistanceToPlane(PortalB, PortalB.TransformPosition(FVector(0.0, 70.0, 10.0))), 0.0, PositionTolerance);
+	TestNearlyEqual(TEXT("Delante de B"), SignedDistanceToPlane(FixturePortalB, FixturePortalB.TransformPosition(FVector(25.0, 40.0, 10.0))), 25.0, PositionTolerance);
+	TestNearlyEqual(TEXT("Sobre el plano"), SignedDistanceToPlane(FixturePortalB, FixturePortalB.TransformPosition(FVector(0.0, 70.0, 10.0))), 0.0, PositionTolerance);
 	// Negativo: detrás del plano la distancia es negativa.
-	TestTrue(TEXT("Detrás de B"), SignedDistanceToPlane(PortalB, PortalB.TransformPosition(FVector(-5.0, 0.0, 0.0))) < 0.0);
+	TestTrue(TEXT("Detrás de B"), SignedDistanceToPlane(FixturePortalB, FixturePortalB.TransformPosition(FVector(-5.0, 0.0, 0.0))) < 0.0);
 	return true;
 }
 
@@ -197,17 +197,17 @@ bool FLiminalCrossingFrontTest::RunTest(const FString& Parameters)
 {
 	const FVector2D HalfExtents(60.0, 110.0);
 	FVector Hit;
-	TestTrue(TEXT("Cruce frontal → trasero"), DetectCrossing(PortalB, HalfExtents,
-		PortalB.TransformPosition(FVector(10.0, 20.0, 30.0)), PortalB.TransformPosition(FVector(-10.0, 20.0, 30.0)), 1000.0, &Hit));
-	TestTrue(TEXT("Punto de cruce"), Hit.Equals(PortalB.TransformPosition(FVector(0.0, 20.0, 30.0)), PositionTolerance));
-	TestTrue(TEXT("Empezar sobre el plano cuenta"), DetectCrossing(PortalB, HalfExtents,
-		PortalB.TransformPosition(FVector(0.0, 0.0, 0.0)), PortalB.TransformPosition(FVector(-1.0, 0.0, 0.0))));
+	TestTrue(TEXT("Cruce frontal → trasero"), DetectCrossing(FixturePortalB, HalfExtents,
+		FixturePortalB.TransformPosition(FVector(10.0, 20.0, 30.0)), FixturePortalB.TransformPosition(FVector(-10.0, 20.0, 30.0)), 1000.0, &Hit));
+	TestTrue(TEXT("Punto de cruce"), Hit.Equals(FixturePortalB.TransformPosition(FVector(0.0, 20.0, 30.0)), PositionTolerance));
+	TestTrue(TEXT("Empezar sobre el plano cuenta"), DetectCrossing(FixturePortalB, HalfExtents,
+		FixturePortalB.TransformPosition(FVector(0.0, 0.0, 0.0)), FixturePortalB.TransformPosition(FVector(-1.0, 0.0, 0.0))));
 
 	// Negativo: quedarse delante o terminar justo sobre el plano no es cruce.
-	TestFalse(TEXT("Mismo lado"), DetectCrossing(PortalB, HalfExtents,
-		PortalB.TransformPosition(FVector(30.0, 0.0, 0.0)), PortalB.TransformPosition(FVector(5.0, 0.0, 0.0))));
-	TestFalse(TEXT("Terminar sobre el plano"), DetectCrossing(PortalB, HalfExtents,
-		PortalB.TransformPosition(FVector(5.0, 0.0, 0.0)), PortalB.TransformPosition(FVector(0.0, 0.0, 0.0))));
+	TestFalse(TEXT("Mismo lado"), DetectCrossing(FixturePortalB, HalfExtents,
+		FixturePortalB.TransformPosition(FVector(30.0, 0.0, 0.0)), FixturePortalB.TransformPosition(FVector(5.0, 0.0, 0.0))));
+	TestFalse(TEXT("Terminar sobre el plano"), DetectCrossing(FixturePortalB, HalfExtents,
+		FixturePortalB.TransformPosition(FVector(5.0, 0.0, 0.0)), FixturePortalB.TransformPosition(FVector(0.0, 0.0, 0.0))));
 	return true;
 }
 
@@ -215,11 +215,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCrossingBackTest, "LiminalPortals.Math.
 bool FLiminalCrossingBackTest::RunTest(const FString& Parameters)
 {
 	const FVector2D HalfExtents(60.0, 110.0);
-	const FVector Front = PortalA.TransformPosition(FVector(10.0, 0.0, 0.0));
-	const FVector Back = PortalA.TransformPosition(FVector(-10.0, 0.0, 0.0));
-	TestFalse(TEXT("Trasero → frontal no cuenta"), DetectCrossing(PortalA, HalfExtents, Back, Front));
+	const FVector Front = FixturePortalA.TransformPosition(FVector(10.0, 0.0, 0.0));
+	const FVector Back = FixturePortalA.TransformPosition(FVector(-10.0, 0.0, 0.0));
+	TestFalse(TEXT("Trasero → frontal no cuenta"), DetectCrossing(FixturePortalA, HalfExtents, Back, Front));
 	// Positivo de control: el mismo segmento al revés sí cuenta.
-	TestTrue(TEXT("Frontal → trasero sí cuenta"), DetectCrossing(PortalA, HalfExtents, Front, Back));
+	TestTrue(TEXT("Frontal → trasero sí cuenta"), DetectCrossing(FixturePortalA, HalfExtents, Front, Back));
 	return true;
 }
 
@@ -229,32 +229,32 @@ bool FLiminalCrossingBoundsTest::RunTest(const FString& Parameters)
 	const FVector2D HalfExtents(60.0, 110.0);
 	auto Cross = [&](double Y, double Z)
 	{
-		return DetectCrossing(PortalB, HalfExtents, PortalB.TransformPosition(FVector(10.0, Y, Z)), PortalB.TransformPosition(FVector(-10.0, Y, Z)));
+		return DetectCrossing(FixturePortalB, HalfExtents, FixturePortalB.TransformPosition(FVector(10.0, Y, Z)), FixturePortalB.TransformPosition(FVector(-10.0, Y, Z)));
 	};
 	TestTrue(TEXT("Dentro, junto al borde"), Cross(59.0, 109.0));
 	TestFalse(TEXT("Fuera por el ancho"), Cross(61.0, 0.0));
 	TestFalse(TEXT("Fuera por el alto"), Cross(0.0, -111.0));
 
 	// Negativo: un salto mayor que MaxStep (aparición del pawn) no cuenta aunque pase por el hueco.
-	TestFalse(TEXT("Salto demasiado largo"), DetectCrossing(PortalB, HalfExtents,
-		PortalB.TransformPosition(FVector(800.0, 0.0, 0.0)), PortalB.TransformPosition(FVector(-800.0, 0.0, 0.0)), 1000.0));
+	TestFalse(TEXT("Salto demasiado largo"), DetectCrossing(FixturePortalB, HalfExtents,
+		FixturePortalB.TransformPosition(FVector(800.0, 0.0, 0.0)), FixturePortalB.TransformPosition(FVector(-800.0, 0.0, 0.0)), 1000.0));
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalClipPlaneTest, "LiminalPortals.Math.ClipPlane.TargetFront", PortalMathTestFlags)
 bool FLiminalClipPlaneTest::RunTest(const FString& Parameters)
 {
-	const FClipPlane Plane = ComputeClipPlane(PortalB, -1.0);
-	TestTrue(TEXT("Normal = frontal de B"), Plane.Normal.Equals(PortalB.GetUnitAxis(EAxis::X), 1e-6));
-	TestTrue(TEXT("Base 1 cm detrás"), Plane.Base.Equals(PortalB.GetLocation() - PortalB.GetUnitAxis(EAxis::X), 1e-6));
+	const FClipPlane Plane = ComputeClipPlane(FixturePortalB, -1.0);
+	TestTrue(TEXT("Normal = frontal de B"), Plane.Normal.Equals(FixturePortalB.GetUnitAxis(EAxis::X), 1e-6));
+	TestTrue(TEXT("Base 1 cm detrás"), Plane.Base.Equals(FixturePortalB.GetLocation() - FixturePortalB.GetUnitAxis(EAxis::X), 1e-6));
 
 	// Lo que hay delante de B se conserva y la placa trasera (60 cm detrás) se recorta.
 	const FPlane Clip(Plane.Base, Plane.Normal);
-	TestTrue(TEXT("Delante se conserva"), Clip.PlaneDot(PortalB.TransformPosition(FVector(200.0, 0.0, 0.0))) > 0.0);
-	TestTrue(TEXT("La placa trasera se recorta"), Clip.PlaneDot(PortalB.TransformPosition(FVector(-60.0, 0.0, 0.0))) < 0.0);
+	TestTrue(TEXT("Delante se conserva"), Clip.PlaneDot(FixturePortalB.TransformPosition(FVector(200.0, 0.0, 0.0))) > 0.0);
+	TestTrue(TEXT("La placa trasera se recorta"), Clip.PlaneDot(FixturePortalB.TransformPosition(FVector(-60.0, 0.0, 0.0))) < 0.0);
 
 	// Negativo: no es el plano del portal de origen.
-	TestFalse(TEXT("No usa la normal del origen"), Plane.Normal.Equals(PortalA.GetUnitAxis(EAxis::X), 1e-3));
+	TestFalse(TEXT("No usa la normal del origen"), Plane.Normal.Equals(FixturePortalA.GetUnitAxis(EAxis::X), 1e-3));
 	return true;
 }
 
@@ -310,8 +310,8 @@ bool FLiminalLargeOffsetTest::RunTest(const FString& Parameters)
 {
 	// Biomas a k × 20 km: el ida y vuelta tiene que seguir siendo submilimétrico con LWC.
 	const FTransform Far = MakePortal(FVector(80000.0 * 100.0, -3000.0, 250.0), -135.0);
-	const FTransform There = MakeTransfer(PortalA, Far);
-	const FTransform Back = MakeTransfer(Far, PortalA);
+	const FTransform There = MakeTransfer(FixturePortalA, Far);
+	const FTransform Back = MakeTransfer(Far, FixturePortalA);
 	const FVector Point(35.0, -12.0, 164.0);
 	const FVector Round = TransferPoint(Back, TransferPoint(There, Point));
 	TestTrue(TEXT("Error < 0,01 cm a 80 km"), Round.Equals(Point, 1e-2));
