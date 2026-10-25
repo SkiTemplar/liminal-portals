@@ -85,4 +85,13 @@ namespace LiminalPortalMath
 	 */
 	LIMINALPORTALS_API FIntPoint ComputeRenderTargetSize(const FIntPoint& ViewportSize, float AspectRatio,
 		float Scale, int32 MaxDimension);
+
+	/**
+	 * Si una captura debe liberar su estado de render persistente (FSceneViewState con su escena de
+	 * Lumen propia, D-31): lleva al menos IdleSeconds sin capturar y la cámara está a ReleaseDistance o
+	 * más del plano del portal (otro mundo desplazado). IdleSeconds <= 0 desactiva la liberación; un
+	 * tiempo o una distancia no finitos o negativos no liberan.
+	 */
+	LIMINALPORTALS_API bool ShouldReleaseCaptureState(double SecondsSinceLastCapture, double DistanceToCamera,
+		double IdleSeconds, double ReleaseDistance);
 }

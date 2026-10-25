@@ -115,6 +115,18 @@ public:
 	bool CaptureView(const FMinimalViewInfo& View, const FIntPoint& RenderTargetSize,
 		TConstArrayView<UPrimitiveComponent*> HiddenComponents);
 
+	/**
+	 * Libera el estado de render persistente de la captura (FSceneViewState y su escena de Lumen con
+	 * atlas propio, D-31) si lleva IdleSeconds sin capturar y la cámara está a ReleaseDistance o más.
+	 * La siguiente captura lo vuelve a crear. El render target se conserva.
+	 * @return true si se liberó en esta llamada.
+	 */
+	bool ReleaseCaptureStateIfIdle(double NowSeconds, const FVector& CameraLocation, double IdleSeconds,
+		double ReleaseDistance);
+
+	/** Si la captura tiene ahora un estado de render persistente (para depuración y tests). */
+	bool HasCaptureState() const { return bHasCaptureState; }
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -157,4 +169,8 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> SurfaceMaterial;
 
 	float CurrentSurfaceDepth = -1.f;
+
+	/** Instante (segundos reales del mundo) de la última captura; solo vale si bHasCaptureState. */
+	double LastCaptureSeconds = 0.0;
+	bool bHasCaptureState = false;
 };

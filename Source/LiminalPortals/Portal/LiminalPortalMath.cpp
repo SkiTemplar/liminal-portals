@@ -168,4 +168,16 @@ namespace LiminalPortalMath
 			FMath::Max(1, FMath::RoundToInt32(Width)),
 			FMath::Max(1, FMath::RoundToInt32(Height)));
 	}
+
+	bool ShouldReleaseCaptureState(double SecondsSinceLastCapture, double DistanceToCamera,
+		double IdleSeconds, double ReleaseDistance)
+	{
+		const bool bValidInput = FMath::IsFinite(SecondsSinceLastCapture) && FMath::IsFinite(DistanceToCamera)
+			&& SecondsSinceLastCapture >= 0.0 && DistanceToCamera >= 0.0;
+		if (!bValidInput || !(IdleSeconds > 0.0))
+		{
+			return false;
+		}
+		return SecondsSinceLastCapture >= IdleSeconds && DistanceToCamera >= FMath::Max(ReleaseDistance, 0.0);
+	}
 }

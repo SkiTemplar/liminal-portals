@@ -348,5 +348,30 @@ bool ALiminalPortal::CaptureView(const FMinimalViewInfo& View, const FIntPoint& 
 	}
 
 	Capture->CaptureScene();
+	bHasCaptureState = true;
+	LastCaptureSeconds = GetWorld()->GetRealTimeSeconds();
+	return true;
+}
+
+bool ALiminalPortal::ReleaseCaptureStateIfIdle(double NowSeconds, const FVector& CameraLocation, double IdleSeconds,
+	double ReleaseDistance)
+{
+	if (!bHasCaptureState)
+	{
+		return false;
+	}
+	const double Distance = FVector::Dist(GetPlaneTransform().GetLocation(), CameraLocation);
+	if (!LiminalPortalMath::ShouldReleaseCaptureState(NowSeconds - LastCaptureSeconds, Distance, IdleSeconds, ReleaseDistance))
+	{
+		return false;
+	}
+	// Con bCaptureEveryFrame = false y sin bAlwaysPersistRenderingState, GetViewState destruye el
+	// FSceneViewState (y con él el FLumenSceneData de la vista). La siguiente captura lo recrea.
+	Capture->bAlwaysPersistRenderingState = false;
+	Capture->GetViewState(0);
+	Capture->bAlwaysPersistRenderingState = true;
+	bHasCaptureState = false;
+	UE_LOG(LogLiminalPortals, Verbose, TEXT("%s: estado de captura liberado (%.0f s sin capturar, a %.0f m)"),
+		*GetName(), NowSeconds - LastCaptureSeconds, Distance / 100.0);
 	return true;
 }

@@ -83,6 +83,8 @@ private:
 	/** @return true si hubo teletransporte. */
 	bool ProcessCrossings(APlayerController* PlayerController, const FVector& CameraLocation);
 	void CaptureVisiblePortals(APlayerController* PlayerController, const FMinimalViewInfo& View);
+	/** Libera el estado de render de los portales lejanos que llevan tiempo sin capturar (D-31). */
+	void ReleaseIdleCaptureStates(const FVector& CameraLocation);
 	const FMinimalViewInfo& SelectCaptureView(const FMinimalViewInfo& View);
 	void PushViewHistory(const FMinimalViewInfo& View);
 

@@ -328,6 +328,12 @@ Las que surjan durante la implementación se añaden aquí con este formato:
 - **Motivo**: un solo camino de datos (semilla → funciones puras → componentes), mapa pequeño y un cambio
   de las recetas no exige regenerar el mapa.
 - **Cómo revertir**: `ALiminalBiome::BuildTerrain`, `BuildScatter` y `BeginPlay` en `World/LiminalBiome.cpp`.
+- **Limitación conocida** (revisión de E6): `UProceduralMeshComponent` no genera mesh distance field ni cards
+  de Lumen en UE 5.6, así que con Lumen por software el terreno no existe para Lumen fuera de pantalla (sin
+  rebote difuso del suelo, sin oclusión de cielo y sin aparecer en reflejos; la dispersión sí entra). No
+  explica D-28 (con Lumen apagado la franja de la selva solo subía de 10,6 a 16,6). Arreglarlo exige pasar
+  el terreno a `UStaticMesh` con distance field (no se construye en tiempo de ejecución en un juego
+  cocinado), a Landscape o a un proxy oculto con `bAffectIndirectLightingWhileHidden`: queda abierto.
 
 ### D-24 · Sol de L_Hub de cara a las puertas de vuelta
 
@@ -469,3 +475,28 @@ Las que surjan durante la implementación se añaden aquí con este formato:
   captura (`LumenFinalGatherQuality`, `LumenSceneLightingQuality`), fuera del límite de dos palancas.
 - **Cómo activar**: `RenderTargetScale=0.73` en `[/Script/LiminalPortals.LiminalPortalsSettings]` de
   `Config/DefaultGame.ini`, o `Liminal.Portal.CaptureScale 0.73` en consola.
+
+### D-31 · Liberar el estado de render de los portales lejanos sin capturar
+
+- **Contexto**: la revisión de E6 confirmó en el código de UE 5.6 que cada captura con Lumen y
+  `bAlwaysPersistRenderingState` tiene su propio `FSceneViewState` con un `FLumenSceneData` de vista
+  (`SceneCaptureRendering.cpp`, `FSceneViewState::AddLumenSceneData`), y con
+  `LumenSurfaceCacheResolution = 1` (D-10) su atlas físico es el completo (`r.LumenScene.SurfaceCache.AtlasSize`,
+  4096² por capa). Con 8 portales eran hasta 8 escenas de Lumen además de la principal, sin liberarse nunca,
+  aunque los 4 portales de vuelta solo se capturan desde su bioma. No se ha medido la memoria
+  (`rhi.DumpResourceMemory`).
+- **Elegida**: tras las capturas de cada fotograma, `ULiminalPortalSubsystem::ReleaseIdleCaptureStates` libera el
+  estado de render de los portales que llevan `Liminal.Portal.ReleaseIdleSeconds` (10 s) sin capturar y están a
+  `Liminal.Portal.ReleaseDistance` (100 m) o más de la cámara: en el hub se conservan los 4 del hub (la sala mide
+  16 m) y se liberan los de los biomas (a 20 km); en un bioma, al revés. La liberación pasa por
+  `USceneCaptureComponent::GetViewState(0)` con `bAlwaysPersistRenderingState` apagado un instante; la siguiente
+  captura lo recrea. El render target se conserva. Regla pura `LiminalPortalMath::ShouldReleaseCaptureState` con
+  test. Comprobado: el Tour por defecto no libera ninguno (49 s, recorrido corto) y da las mismas cifras; con
+  `ReleaseIdleSeconds 0.5` libera 25 veces y las 13 capturas siguen pasando `check_tour.py`.
+- **Alternativas**: `LumenSurfaceCacheResolution = 0,5` (atlas de 2048², la cuarta parte, pero cambia la imagen
+  que D-10 ajustó; mínimo que admite el motor); liberar solo por tiempo, sin distancia (relanza la escena de
+  Lumen de las puertas del hub al girarse en la sala); no hacer nada (memoria acotada a 8 escenas).
+- **Coste**: al volver a ver un portal liberado, su escena de Lumen se reconstruye desde cero y la luz indirecta
+  de la imagen tarda unos fotogramas en converger (el mismo caso que la primera captura de cada portal).
+- **Cómo revertir**: `Liminal.Portal.ReleaseIdleSeconds 0`, o quitar `ReleaseIdleCaptureStates` de
+  `Portal/LiminalPortalSubsystem.cpp`.

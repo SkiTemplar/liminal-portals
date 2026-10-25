@@ -36,6 +36,20 @@ namespace
 		TEXT("(0 = la de ULiminalPortalsSettings::RenderTargetScale; si no, entre 0,1 y 2)."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<float> CVarReleaseIdleSeconds(
+		TEXT("Liminal.Portal.ReleaseIdleSeconds"),
+		10.f,
+		TEXT("Memoria (D-31): segundos sin capturar tras los que un portal lejano libera su estado de render ")
+		TEXT("y su escena de Lumen propia (0 = no liberar nunca)."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<float> CVarReleaseDistance(
+		TEXT("Liminal.Portal.ReleaseDistance"),
+		10000.f,
+		TEXT("Memoria (D-31): distancia mínima en cm de la cámara al portal para liberar su estado de render ")
+		TEXT("(100 m: más que el hub, mucho menos que los 20 km entre mundos)."),
+		ECVF_Default);
+
 	constexpr int32 MaxLagFrames = 4;
 }
 
@@ -92,6 +106,7 @@ void ULiminalPortalSubsystem::UpdatePortals(APlayerController* PlayerController,
 	PreviousCameraLocation = FinalView.Location;
 
 	CaptureVisiblePortals(PlayerController, FinalView);
+	ReleaseIdleCaptureStates(FinalView.Location);
 	PushViewHistory(FinalView);
 	OnPortalsUpdated.Broadcast(FinalView);
 }
@@ -228,6 +243,24 @@ void ULiminalPortalSubsystem::CaptureVisiblePortals(APlayerController* PlayerCon
 		{
 			++LastCaptureCount;
 			LastCaptureSize = TargetSize;
+		}
+	}
+}
+
+void ULiminalPortalSubsystem::ReleaseIdleCaptureStates(const FVector& CameraLocation)
+{
+	const double IdleSeconds = CVarReleaseIdleSeconds.GetValueOnGameThread();
+	if (IdleSeconds <= 0.0)
+	{
+		return;
+	}
+	const double ReleaseDistance = CVarReleaseDistance.GetValueOnGameThread();
+	const double Now = GetWorld()->GetRealTimeSeconds();
+	for (const TWeakObjectPtr<ALiminalPortal>& Entry : Portals)
+	{
+		if (ALiminalPortal* Portal = Entry.Get())
+		{
+			Portal->ReleaseCaptureStateIfIdle(Now, CameraLocation, IdleSeconds, ReleaseDistance);
 		}
 	}
 }

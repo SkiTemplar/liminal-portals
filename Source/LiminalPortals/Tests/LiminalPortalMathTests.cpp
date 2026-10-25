@@ -1,6 +1,7 @@
 #include "Misc/AutomationTest.h"
 #include "Math/RandomStream.h"
 #include "Portal/LiminalPortalMath.h"
+#include <limits>
 
 // Tests de la matemática pura de portales. Cada test incluye al menos un caso positivo y uno negativo.
 
@@ -318,5 +319,21 @@ bool FLiminalLargeOffsetTest::RunTest(const FString& Parameters)
 
 	// Negativo: el punto transferido está realmente lejos del original.
 	TestTrue(TEXT("Llega al bioma"), FVector::Dist(TransferPoint(There, Point), Point) > 7000000.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalCaptureStateReleaseTest, "LiminalPortals.Math.Capture.ReleaseIdleState", PortalMathTestFlags)
+bool FLiminalCaptureStateReleaseTest::RunTest(const FString& Parameters)
+{
+	// Portal de otro bioma (20 km) sin capturar desde hace 12 s, con 10 s y 100 m de umbral: se libera.
+	TestTrue(TEXT("Inactivo y lejos ⇒ libera"), ShouldReleaseCaptureState(12.0, 2000000.0, 10.0, 10000.0));
+	TestTrue(TEXT("Justo en los umbrales ⇒ libera"), ShouldReleaseCaptureState(10.0, 10000.0, 10.0, 10000.0));
+
+	// Negativos: reciente, cerca (puerta del mismo hub), desactivado o entradas no válidas.
+	TestFalse(TEXT("Capturado hace poco ⇒ conserva"), ShouldReleaseCaptureState(9.9, 2000000.0, 10.0, 10000.0));
+	TestFalse(TEXT("En el mismo hub (16 m) ⇒ conserva"), ShouldReleaseCaptureState(600.0, 1600.0, 10.0, 10000.0));
+	TestFalse(TEXT("IdleSeconds 0 ⇒ desactivado"), ShouldReleaseCaptureState(600.0, 2000000.0, 0.0, 10000.0));
+	TestFalse(TEXT("Tiempo negativo ⇒ conserva"), ShouldReleaseCaptureState(-1.0, 2000000.0, 10.0, 10000.0));
+	TestFalse(TEXT("Distancia NaN ⇒ conserva"), ShouldReleaseCaptureState(600.0, std::numeric_limits<double>::quiet_NaN(), 10.0, 10000.0));
 	return true;
 }
