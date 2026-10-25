@@ -311,3 +311,86 @@ Las que surjan durante la implementación se añaden aquí con este formato:
 - **Regla**: un símbolo de namespace anónimo debe ser único en el módulo; lo compartido va a un
   header con namespace propio.
 - **Cómo revertir**: quitar `-DisableAdaptiveUnity` de `Tools/build.ps1`.
+
+### D-23 · Terreno y dispersión como componentes transitorios regenerados desde la semilla
+
+- **Contexto**: D-17 guarda en el mapa las instancias del blockout. El terreno de 400 × 400 m a 2 m
+  (40 401 vértices) y hasta 11 200 instancias por bioma guardados en `L_Hub` (sin LFS) habrían hecho
+  crecer el mapa varios MB en cada regeneración, y `ProcMeshSections` es `UPROPERTY` (se serializa).
+- **Elegida**: `UProceduralMeshComponent` y un `UHierarchicalInstancedStaticMeshComponent` por categoría
+  creados con `NewObject(..., RF_Transient)` en `BuildProceduralContent`, desde `OnConstruction` (editor)
+  y desde `BeginPlay` si no existen (juego, PIE). La pared exenta y la niebla siguen siendo subobjetos
+  guardados. Se quita el suelo de losa: el terreno es el suelo. `L_Hub` pasa de 85,5 KB a 89,6 KB.
+  Generación de los cuatro biomas en `BeginPlay`: 0,36 s en total (log del Tour). Navegación desactivada
+  en todos los componentes (D-17); colisión solo en terreno, troncos, rocas grandes, bloques de roca y de hielo.
+- **Alternativas**: guardar los componentes en el mapa como en D-17 (sin coste en `BeginPlay`, pero el
+  mapa crece y un cambio en C++ exige regenerar `L_Hub`); PCG (decisión 9 del plan).
+- **Motivo**: un solo camino de datos (semilla → funciones puras → componentes), mapa pequeño y un cambio
+  de las recetas no exige regenerar el mapa.
+- **Cómo revertir**: `ALiminalBiome::BuildTerrain`, `BuildScatter` y `BeginPlay` en `World/LiminalBiome.cpp`.
+
+### D-24 · Sol de L_Hub de cara a las puertas de vuelta
+
+- **Contexto**: con el sol de E2 (`pitch −42°, yaw 35°`, la luz viaja hacia +X) la cara frontal de cada
+  pared exenta quedaba en su propia sombra y la sombra caía delante de la puerta, oscureciendo el primer
+  plano visto desde el hub (D-18).
+- **Elegida**: en `L_Hub`, `pitch −35°, yaw 125°` (la luz viaja hacia −X y +Y): la cara frontal recibe
+  luz (franja de pared alrededor del marco con luminancia 212-220 en las vistas desde el bioma) y la
+  sombra cae detrás de la pared y hacia un lado. Visto desde el hub (mirando a +X) el paisaje queda con
+  luz lateral, que marca el relieve de las dunas. `L_Calibration` conserva el sol de E2 para no mover su medida.
+- **Alternativas**: girar las paredes de vuelta 180° (cambia la convención de los portales y el cruce);
+  sol a contraluz desde +X (paisaje plano y oscuro visto desde el hub).
+- **Cómo revertir**: `HUB_SUN_ROTATION` en `Tools/Content/build_content.py`.
+
+### D-25 · Niebla local con el componente de ALocalFogVolume y parámetros del shader de UE 5.6
+
+- **Contexto**: el plan pide `ALocalFogVolume` en la selva y la Antártida. Con densidades «por metro»
+  pequeñas (0,015) no se veía niebla: `LocalFogVolumeCommon.ush` combina las opacidades radial y de altura
+  multiplicándolas en el espacio de la esfera unidad (`T = 1 − (1 − T_r)(1 − T_h)`) y escala después por
+  el radio en metros; con densidad radial 0 la niebla es nula. Además empieza a 20 m
+  (`r.LocalFogVolume.GlobalStartDistance`).
+- **Elegida**: `ULocalFogVolumeComponent` (el componente de `ALocalFogVolume`) como subobjeto de
+  `ALiminalBiome`, esfera de 300 m centrada en la puerta, configurado por tipo en `ApplyAtmosphere`.
+  Selva: radial 2, altura 0,04, caída 7500 (1/e cada 4 m): cobertura ~50 % a 100 m en horizontal y 1 %
+  hacia el cielo a 30°. Antártida: radial 2, altura 0,03, caída 800: ~50 % a 100 m y ~60 % hacia el cielo
+  (aproximación de cielo cubierto con el sol compartido). Valores calculados reproduciendo la integral del
+  shader y comprobados en las capturas del Tour.
+- **Alternativas**: un actor `ALocalFogVolume` por bioma colocado desde Python (los parámetros quedarían
+  fuera del C++ del bioma); `ExponentialHeightFog` global (se aplicaría también al hub). La luz difusa de
+  verdad en la Antártida exige su propia luz (riesgo 1, opción 1b): con el sol compartido las sombras
+  siguen siendo duras.
+- **Doble niebla (D-13)**: desde el hub no hay niebla en el tramo cámara-portal; desde el bioma, la del
+  tramo cámara-puerta es la que hay de verdad, y el hub no tiene niebla. No hay doble aplicación.
+- **Cómo revertir**: `LiminalBiomeDetail::GetBiomeFog` en `World/LiminalBiome.cpp`.
+
+### D-26 · Terreno: color por vértice, zona llana y recetas de dispersión
+
+- **Contexto**: el plan fija campo de alturas y dispersión puros, no sus parámetros.
+- **Elegida**: ruido de valor con hash entero (lowbias32) y fBm normalizado a [−1, 1], de modo que cada
+  tipo tiene un intervalo de alturas garantizado por construcción (selva −5,5/+6,5 m, desierto −0,6/+8,1 m,
+  Antártida ±2,9 m, cultivos −0,9/+0,85 m). Dunas: perfil asimétrico de 55 m con orientación sacada de la
+  semilla y crestas alabeadas. Zona llana: cápsula de 6 m de radio de X = −8 m a +30 m y transición
+  smoothstep de 15 m; el relieve se multiplica por ese peso, así que la puerta y el camino quedan a Z = 0
+  exacto. Colores por vértice guardados en sRGB y devueltos a lineal en `M_Terrain` (`VertexColor^2,2`;
+  en lineal de 8 bits los verdes oscuros se bandeaban). Dispersión: rejilla con jitter del 80 % (una
+  muestra por celda, separación mínima 0,2 · celda), densidad modulada por fBm y exclusión de 10 m en la
+  puerta y 7 m a lo largo del camino de salida (35 m), con la huella de cada capa; un filtro final quita
+  cualquier pieza derivada con el centro dentro. Instancias con las semillas 1001-1004: selva 11 201,
+  desierto 1539, Antártida 889, cultivos 3318 (presupuesto 15 000).
+- **Alternativas**: Poisson disk de Bridson (mejor distribución, más código y más difícil de hacer
+  estable al cambiar el área); ruido Perlin del motor (`FMath::PerlinNoise2D`, sin semilla).
+- **Cómo revertir**: `World/LiminalTerrainMath.*`, `World/LiminalScatterMath.*` y `build_terrain_material`
+  en `Tools/Content/build_content.py`.
+
+### D-27 · Comprobaciones del Tour y lámina
+
+- **Contexto**: la luminancia media no detecta una imagen uniforme ni un portal que muestre lo mismo que
+  su marco.
+- **Elegida**: `Liminal.Tour` añade, por puerta, una vista desde dentro (pies a 6 m de la puerta, de
+  espaldas a ella, pitch −4°) y guarda en `tour.json` los polígonos en píxeles del hueco, del exterior del
+  marco y de una franja de 50 cm de pared. `check_tour.py` exige además desviación de luminancia > 6 en
+  toda captura y, en las vistas de puerta, desviación > 4 dentro del hueco y distancia RGB media de los
+  píxeles del hueco al color medio del marco > 20 (medido: 68-205). Comparar solo medias fallaba con la
+  selva (14,7: paisaje oscuro y variado). Desde el bioma, la franja de pared debe tener luminancia ≥ 150
+  (D-24; medido 212-220). `make_lamina.py` compone `Saved/Tour/lamina.png` (4 filas × 3 columnas).
+- **Cómo revertir**: `Debug/LiminalTour.*`, `Tools/Verify/check_tour.py`, `Tools/Verify/make_lamina.py`.

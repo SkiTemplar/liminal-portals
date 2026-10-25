@@ -8,8 +8,10 @@
 #               (20 ciclos hub -> bioma -> hub por puerta). Lee Saved/SelfTest.json y falla si no pasa.
 #   -SelfTestNegative  Con -SelfTest, añade el control negativo (velocidad al 97 % tras cada paso:
 #               la prueba tiene que fallar en las cuatro puertas). Deja Saved/SelfTest.json del negativo.
-#   -Tour       Etapa E3: lanza /Game/Maps/L_Hub con Liminal.Tour y comprueba las capturas de Saved/Tour/
-#               con Tools/Verify/check_tour.py (luminancia media); escribe Saved/Tour/result.json.
+#   -Tour       Etapas E3 y E4: lanza /Game/Maps/L_Hub con Liminal.Tour (13 capturas: hub y, por puerta,
+#               desde el hub, desde el bioma y desde dentro), las comprueba con Tools/Verify/check_tour.py
+#               (luminancia, desviación y hueco distinto del marco; Saved/Tour/result.json) y compone
+#               Saved/Tour/lamina.png con Tools/Verify/make_lamina.py.
 #   -ExecCmds   Órdenes de consola extra antes de la verificación (p. ej. 'r.AntiAliasingMethod 1').
 #
 # Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-ExecCmds '...']
@@ -135,7 +137,13 @@ function Invoke-Tour([string[]]$ExtraCommands) {
         '--tour', $tourDir, '--out', $result) '.'
     if ($code -ne 0) { throw "Las capturas del Tour no cumplen (código $code): ver $result" }
     $shots = @((Get-Content $index -Raw -Encoding UTF8 | ConvertFrom-Json).shots).Count
-    if ($shots -ne 1 + 2 * $NumDoors) { throw "El Tour tiene $shots capturas y se esperaban $(1 + 2 * $NumDoors)" }
+    if ($shots -ne 1 + 3 * $NumDoors) { throw "El Tour tiene $shots capturas y se esperaban $(1 + 3 * $NumDoors)" }
+
+    $lamina = Join-Path $tourDir 'lamina.png'
+    $make = Join-Path $ProjectRoot 'Tools\Verify\make_lamina.py'
+    $code = Invoke-Native 'uv' @('run', '--no-project', '--with', 'pillow', 'python', $make, '--tour', $tourDir, '--out', $lamina) '.'
+    if ($code -ne 0 -or -not (Test-Path $lamina)) { throw "No se pudo generar $lamina (código $code)" }
+    Write-Host "Lámina: $lamina"
 }
 
 if (-not ($Calibrate -or $SelfTest -or $Tour)) {

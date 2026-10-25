@@ -1,6 +1,8 @@
 #include "Misc/AutomationTest.h"
 
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/LocalFogVolumeComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/RectLightComponent.h"
 #include "Engine/Engine.h"
@@ -11,6 +13,7 @@
 #include "Portal/LiminalPortal.h"
 #include "Portal/LiminalPortalMath.h"
 #include "Portal/LiminalPortalSubsystem.h"
+#include "ProceduralMeshComponent.h"
 #include "World/LiminalBiome.h"
 #include "World/LiminalHub.h"
 #include "World/LiminalWorldLayout.h"
@@ -251,7 +254,7 @@ bool FLiminalHubActorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBiomeActorTest, "LiminalPortals.World.Biome.ReturnDoorAndGround", WorldTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBiomeActorTest, "LiminalPortals.World.Biome.ReturnDoorAndTerrain", WorldTestFlags)
 bool FLiminalBiomeActorTest::RunTest(const FString& Parameters)
 {
 	FScopedGameWorld Scope;
@@ -265,9 +268,33 @@ bool FLiminalBiomeActorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Puerta sin escala"), Door.GetScale3D().Equals(FVector::OneVector));
 	TestNearlyEqual(TEXT("Mira con el bioma"), Door.Rotator().Yaw, 45.0, 1e-4);
 
-	const UPrimitiveComponent* Ground = FindPrimitive(Biome, TEXT("Ground"));
-	UTEST_NOT_NULL(TEXT("Suelo"), Ground);
-	TestNearlyEqual(TEXT("Cara superior del suelo a ras de la puerta"), Ground->Bounds.GetBox().Max.Z, Origin.Z, 0.5);
+	// Terreno procedural (E4): transitorio, con colisión y a ras de la puerta en la zona llana.
+	TInlineComponentArray<UProceduralMeshComponent*> Terrains(Biome);
+	UTEST_EQUAL(TEXT("Un terreno"), Terrains.Num(), 1);
+	const UProceduralMeshComponent* Terrain = Terrains[0];
+	TestTrue(TEXT("Terreno transitorio (no se guarda en el mapa)"), Terrain->HasAnyFlags(RF_Transient));
+	TestEqual(TEXT("Terreno de 201 × 201 vértices"), Biome->TerrainVertexCount, 201 * 201);
+	TestTrue(TEXT("El terreno bloquea"), Terrain->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
+	FHitResult Hit;
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(LiminalBiomeTest), true);
+	const FVector Above = Door.TransformPositionNoScale(FVector(300.0, 0.0, 500.0));
+	UTEST_TRUE(TEXT("El suelo delante de la puerta tiene colisión"), Scope.World->LineTraceSingleByChannel(Hit, Above, Above - FVector(0.0, 0.0, 1000.0), ECC_Visibility, Query));
+	TestNearlyEqual(TEXT("Suelo a ras de la puerta"), Hit.ImpactPoint.Z, Origin.Z, 0.5);
+	TestTrue(TEXT("El impacto es el terreno"), Hit.GetComponent() == Terrain);
+	TestNearlyEqual(TEXT("Altura del terreno en la puerta"), Biome->GetTerrainHeightAt(Door.TransformPositionNoScale(FVector(500.0, 0.0, 0.0))), Origin.Z, 1e-6);
+
+	// Dispersión: HISM por categoría, dentro del presupuesto, y el camino de salida despejado.
+	TInlineComponentArray<UHierarchicalInstancedStaticMeshComponent*> Scatter(Biome);
+	TestTrue(TEXT("Hay dispersión"), Scatter.Num() > 0 && Biome->ScatterInstanceCount > 0);
+	TestTrue(TEXT("Dentro del presupuesto de 15.000 instancias"), Biome->ScatterInstanceCount <= 15000);
+	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(34.f, 88.f);
+	const FVector PathStart = Door.TransformPositionNoScale(FVector(100.0, 0.0, 95.0));
+	const FVector PathEnd = Door.TransformPositionNoScale(FVector(3000.0, 0.0, 95.0));
+	TestFalse(TEXT("Camino de salida de 30 m sin obstáculos"), Scope.World->SweepTestByChannel(PathStart, PathEnd, FQuat::Identity, ECC_Pawn, Capsule, Query));
+	TInlineComponentArray<ULocalFogVolumeComponent*> Fogs(Biome);
+	UTEST_EQUAL(TEXT("Una niebla local"), Fogs.Num(), 1);
+	TestTrue(TEXT("La selva tiene niebla baja"), Fogs[0]->IsVisible() && Fogs[0]->HeightFogExtinction > 0.f);
+
 	const UInstancedStaticMeshComponent* Wall = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Biome, TEXT("ReturnWall")));
 	UTEST_NOT_NULL(TEXT("Pared exenta"), Wall);
 	TestEqual(TEXT("Dos tramos y dintel"), Wall->GetInstanceCount(), 3);
@@ -288,5 +315,16 @@ bool FLiminalBiomeActorTest::RunTest(const FString& Parameters)
 	const UInstancedStaticMeshComponent* NarrowWall = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Narrow, TEXT("ReturnWall")));
 	UTEST_NOT_NULL(TEXT("Pared del estrecho"), NarrowWall);
 	TestEqual(TEXT("Sin pared"), NarrowWall->GetInstanceCount(), 0);
+
+	// Negativo: sin generación procedural no hay terreno ni dispersión, y la niebla queda apagada.
+	ALiminalBiome* Bare = Scope.World->SpawnActorDeferred<ALiminalBiome>(ALiminalBiome::StaticClass(), FTransform(FVector(0.0, 100000.0, 0.0)));
+	UTEST_NOT_NULL(TEXT("Bioma sin contenido"), Bare);
+	Bare->bGenerateProceduralContent = false;
+	Bare->FinishSpawning(FTransform(FVector(0.0, 100000.0, 0.0)));
+	TInlineComponentArray<UProceduralMeshComponent*> BareTerrains(Bare);
+	TestEqual(TEXT("Sin terreno"), BareTerrains.Num(), 0);
+	TestEqual(TEXT("Sin instancias"), Bare->ScatterInstanceCount, 0);
+	TInlineComponentArray<ULocalFogVolumeComponent*> BareFogs(Bare);
+	TestTrue(TEXT("Niebla apagada"), BareFogs.Num() == 1 && !BareFogs[0]->IsVisible());
 	return true;
 }

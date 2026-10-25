@@ -12,6 +12,10 @@
   k × 20 km en X (k = 1..4: selva, desierto, Antártida, cultivos), ocho portales enlazados por
   parejas (puerta del hub <-> puerta de vuelta), el mismo sol, cielo, SkyLight y post-process global
   que la calibración, y el PlayerStart dentro del hub. Materiales MI_Hub_* y MI_Biome_*.
+- Etapa E4: /Game/Biomes/Materials/M_Terrain (color por vértice del terreno procedural, guardado en
+  sRGB, por un parámetro Color) con MI_Biome_<Tipo> como hijos, y MI_Scatter_<Categoría> (hijos de
+  M_Basic) con los colores de ALiminalBiome::GetScatterColor. El sol de L_Hub llega por delante y de
+  lado a las puertas de vuelta (HUB_SUN_ROTATION); el de L_Calibration no cambia.
 
 Uso: powershell -File Tools/content.ps1 (lanza UnrealEditor-Cmd -run=pythonscript con este script).
 Escribe Saved/Content/build_content.json con el resultado; content.ps1 lo comprueba.
@@ -42,6 +46,7 @@ HUB_CLASS = "/Script/LiminalPortals.LiminalHub"
 BIOME_CLASS = "/Script/LiminalPortals.LiminalBiome"
 HUB_MI_FOLDER = "/Game/Hub/Materials"
 BIOME_MI_FOLDER = "/Game/Biomes/Materials"
+TERRAIN_PATH = "/Game/Biomes/Materials/M_Terrain"
 
 # Debe coincidir con SurfaceTextureParameter de Config/DefaultGame.ini.
 SURFACE_TEXTURE_PARAMETER = "PortalTexture"
@@ -75,6 +80,11 @@ SCATTER_COUNT = 28
 # Exposición manual (EV) del post-process global; con el sol a 10 lux da tonos medios.
 EXPOSURE_BIAS = 0.0
 SUN_LUX = 10.0
+# unreal.Rotator(roll, pitch, yaw). Calibración: el sol de E2 (no se toca para no mover la medida).
+CALIBRATION_SUN_ROTATION = (0.0, -42.0, 35.0)
+# L_Hub (E4, D-24): la luz viaja hacia -X y +Y, así que llega a la cara frontal (+X) de cada pared de
+# vuelta y su sombra cae detrás y a un lado; desde el hub (mirando a +X) el paisaje tiene luz lateral.
+HUB_SUN_ROTATION = (0.0, -35.0, 125.0)
 
 
 def build_surface_material():
@@ -171,9 +181,9 @@ def place_scatter(actors, mats):
                        mats[colors[rng.randrange(len(colors))]], f"Scatter_{index:02d}_{shape}", rng.uniform(0.0, 90.0))
 
 
-def place_lighting(actors):
+def place_lighting(actors, sun_rotation=CALIBRATION_SUN_ROTATION):
     sun = cu.spawn(actors, unreal.DirectionalLight, unreal.Vector(0.0, 0.0, 1000.0), "Sun")
-    sun.set_actor_rotation(unreal.Rotator(0.0, -42.0, 35.0), False)
+    sun.set_actor_rotation(unreal.Rotator(*sun_rotation), False)
     sun_component = sun.get_component_by_class(unreal.DirectionalLightComponent)
     sun_component.set_editor_property("mobility", unreal.ComponentMobility.MOVABLE)
     sun_component.set_editor_property("intensity", SUN_LUX)
@@ -263,6 +273,8 @@ BIOMES = [("JUNGLE", 1001), ("DESERT", 1002), ("ANTARCTIC", 1003), ("FARMLAND", 
 HUB_PLAYER_START = (-650.0, 0.0, 100.0)
 # Las dos puertas de una pareja están en mundos distintos: a más de 1 km.
 MIN_PAIR_DISTANCE = 100000.0
+# Presupuesto orientativo de instancias por bioma (igual que LiminalScatterMath::MaxInstancesPerBiome).
+MAX_SCATTER_INSTANCES = 15000
 
 
 def build_hub_instances(basic):
@@ -276,15 +288,47 @@ def build_hub_instances(basic):
     return instances
 
 
-def build_biome_instances(basic):
-    """Un MI por tipo de bioma con el color de ALiminalBiome::GetBiomeBaseColor (fuente única en C++)."""
+def build_terrain_material():
+    """Terreno procedural: color base = Color × VertexColor^2,2 (el C++ guarda los colores en sRGB)."""
+    material = cu.recreate_material(TERRAIN_PATH)
+    vertex = cu.expr(material, unreal.MaterialExpressionVertexColor, -800, -200)
+    power = cu.expr(material, unreal.MaterialExpressionPower, -550, -200)
+    power.set_editor_property("const_exponent", 2.2)
+    cu.connect(vertex, "", power, "Base")
+    color = cu.vector_param(material, "Color", (1.0, 1.0, 1.0), -550, -50)
+    multiply = cu.expr(material, unreal.MaterialExpressionMultiply, -300, -150)
+    cu.connect(power, "", multiply, "A")
+    cu.connect(color, "", multiply, "B")
+    roughness = cu.scalar_param(material, "Roughness", 0.9, -400, 100)
+    cu.to_property(multiply, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    cu.to_property(roughness, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    cu.finish_material(material)
+    return material
+
+
+# Rugosidad del terreno por tipo: la arena y el hielo brillan algo más que la tierra.
+TERRAIN_ROUGHNESS = {"JUNGLE": 0.9, "DESERT": 0.8, "ANTARCTIC": 0.55, "FARMLAND": 0.95}
+
+
+def build_biome_instances(terrain):
+    """Un MI de terreno por tipo de bioma, hijo de M_Terrain: el color sale de los vértices (C++)."""
     instances = {}
     for type_name, _seed in BIOMES:
         biome_type = getattr(unreal.LiminalBiomeType, type_name)
-        color = unreal.LiminalBiome.get_biome_base_color(biome_type)
         label = unreal.LiminalBiome.get_biome_type_name(biome_type)
-        instances[type_name] = cu.ensure_material_instance(f"{BIOME_MI_FOLDER}/MI_Biome_{label}", basic,
-                                                           {"Color": (color.r, color.g, color.b)}, {"Roughness": 0.9})
+        instances[type_name] = cu.ensure_material_instance(f"{BIOME_MI_FOLDER}/MI_Biome_{label}", terrain,
+                                                           {"Color": (1.0, 1.0, 1.0)}, {"Roughness": TERRAIN_ROUGHNESS[type_name]})
+    return instances
+
+
+def build_scatter_instances(basic):
+    """MI_Scatter_<Categoría> con el color y la rugosidad de ALiminalBiome::GetScatterColor (fuente única en C++)."""
+    instances = {}
+    for category in unreal.LiminalBiome.get_all_scatter_categories():
+        name = unreal.LiminalBiome.get_scatter_category_name(category)
+        color, roughness = unreal.LiminalBiome.get_scatter_color(category)
+        instances[category] = cu.ensure_material_instance(f"{BIOME_MI_FOLDER}/MI_Scatter_{name}", basic,
+                                                          {"Color": (color.r, color.g, color.b)}, {"Roughness": roughness})
     return instances
 
 
@@ -309,8 +353,20 @@ def place_hub(actors, hub_mats):
     return hub
 
 
-def place_biomes(actors, biome_mats, wall_material, hub):
+def check_biome_content(biome, label):
+    """OnConstruction tiene que haber generado el terreno y la dispersión (componentes transitorios, D-23)."""
+    terrains = biome.get_components_by_class(unreal.ProceduralMeshComponent)
+    cu.require(len(terrains) == 1, f"{label} no tiene terreno procedural")
+    instances = biome.get_editor_property("scatter_instance_count")
+    vertices = biome.get_editor_property("terrain_vertex_count")
+    cu.require(0 < instances <= MAX_SCATTER_INSTANCES, f"{label}: {instances} instancias (presupuesto {MAX_SCATTER_INSTANCES})")
+    cu.require(vertices > 0, f"{label} sin vértices de terreno")
+    return {"instances": instances, "terrainVertices": vertices}
+
+
+def place_biomes(actors, biome_mats, scatter_mats, wall_material, hub):
     biomes = []
+    stats = {}
     door_size = hub.get_editor_property("door_size")
     frame = hub.get_editor_property("door_frame_thickness")
     for index, (type_name, seed) in enumerate(BIOMES):
@@ -318,15 +374,21 @@ def place_biomes(actors, biome_mats, wall_material, hub):
         label = unreal.LiminalBiome.get_biome_type_name(biome_type)
         location = unreal.Vector((index + 1) * BIOME_SPACING, 0.0, 0.0)
         biome = cu.spawn(actors, cu.load_class(BIOME_CLASS), location, f"Biome_{label}")
+        # Cada set_editor_property regenera el bioma (OnConstruction): el contenido procedural se
+        # desactiva mientras se configura y se activa al final, para generarlo una sola vez.
+        biome.set_editor_property("generate_procedural_content", False)
         biome.set_editor_property("biome_type", biome_type)
         biome.set_editor_property("seed", seed)
         biome.set_editor_property("door_size", door_size)
         biome.set_editor_property("door_frame_thickness", frame)
         biome.set_editor_property("ground_material", biome_mats[type_name])
         biome.set_editor_property("wall_material", wall_material)
+        biome.set_editor_property("scatter_materials", scatter_mats)
+        biome.set_editor_property("generate_procedural_content", True)
         check_generated(biome, f"Biome_{label}", wall_material)
+        stats[label] = check_biome_content(biome, f"Biome_{label}")
         biomes.append((label, biome))
-    return biomes
+    return biomes, stats
 
 
 def spawn_portal(actors, portal_class, transform, label, size, frame):
@@ -367,7 +429,8 @@ def build_hub_map(basic):
     level_subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     hub_mats = build_hub_instances(basic)
-    biome_mats = build_biome_instances(basic)
+    biome_mats = build_biome_instances(build_terrain_material())
+    scatter_mats = build_scatter_instances(basic)
     if cu.EAL.does_asset_exist(HUB_MAP):
         cu.require(cu.EAL.delete_asset(HUB_MAP), f"No se pudo borrar {HUB_MAP}")
     cu.require(level_subsystem.new_level(HUB_MAP, False), f"No se pudo crear {HUB_MAP}")
@@ -376,18 +439,19 @@ def build_hub_map(basic):
     world.get_world_settings().set_editor_property("force_no_precomputed_lighting", True)
 
     hub = place_hub(actors, hub_mats)
-    biomes = place_biomes(actors, biome_mats, hub_mats["Wall"], hub)
+    biomes, biome_stats = place_biomes(actors, biome_mats, scatter_mats, hub_mats["Wall"], hub)
     pairs = place_hub_portals(actors, hub, biomes)
     check_hub_portals(pairs)
-    place_lighting(actors)
+    place_lighting(actors, HUB_SUN_ROTATION)
     place_post_process(actors)
     cu.spawn(actors, unreal.PlayerStart, unreal.Vector(*HUB_PLAYER_START), "PlayerStart", 0.0)
 
     cu.require(unreal.EditorLoadingAndSavingUtils.save_map(world, HUB_MAP), f"No se pudo guardar {HUB_MAP}")
     count = len(actors.get_all_level_actors())
     unreal.log(f"[LiminalContent] {HUB_MAP}: {count} actores, {2 * len(pairs)} portales")
-    assets = [mi.get_path_name() for mi in list(hub_mats.values()) + list(biome_mats.values())]
-    return count, 2 * len(pairs), assets
+    materials = list(hub_mats.values()) + list(biome_mats.values()) + list(scatter_mats.values())
+    assets = [TERRAIN_PATH] + [mi.get_path_name() for mi in materials]
+    return count, 2 * len(pairs), assets, biome_stats
 
 
 def write_result(result):
@@ -404,12 +468,13 @@ def main():
         basic = build_basic_material()
         mats = build_calibration_instances(basic)
         actor_count = build_calibration_map(mats)
-        hub_actors, hub_portals, hub_assets = build_hub_map(basic)
+        hub_actors, hub_portals, hub_assets, biome_stats = build_hub_map(basic)
         result["assets"] = [surface.get_path_name(), fallback.get_path_name(), basic.get_path_name(), CALIBRATION_MAP, HUB_MAP]
         result["assets"] += [mi.get_path_name() for mi in mats.values()] + hub_assets
         result["calibrationActors"] = actor_count
         result["hubActors"] = hub_actors
         result["hubPortals"] = hub_portals
+        result["biomes"] = biome_stats
         result["ok"] = True
         unreal.log("[LiminalContent] OK")
     except Exception as error:  # noqa: BLE001 - se registra y se refleja en el JSON de resultado

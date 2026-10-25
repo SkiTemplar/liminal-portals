@@ -148,8 +148,10 @@ La geometría sale de funciones puras (`World/LiminalWorldLayout`) y se regenera
 un cambio de layout en C++ exige volver a generar el mapa (ver `docs/DECISIONES.md`, D-16 a D-18).
 
 `Liminal.SelfTest [Ciclos]` cruza cada puerta ida y vuelta con entrada simulada (Enhanced Input
-inyectado) y paso fijo de 1/60 s, y escribe `Saved/SelfTest.json`; `Liminal.Tour` guarda nueve
-capturas en `Saved/Tour/` y `Tools/Verify/check_tour.py` comprueba que no son negras.
+inyectado) y paso fijo de 1/60 s, y escribe `Saved/SelfTest.json`; `Liminal.Tour` guarda trece
+capturas en `Saved/Tour/` (hub y, por puerta, desde el hub, desde el bioma y desde dentro) y
+`Tools/Verify/check_tour.py` comprueba que no son negras, quemadas ni uniformes y que el hueco del
+portal muestra otra cosa que su marco; `make_lamina.py` compone `Saved/Tour/lamina.png`.
 
 | Medida (1280×720, paso fijo 1/60 s) | Resultado |
 |---|---|
@@ -158,7 +160,31 @@ capturas en `Saved/Tour/` y `Tools/Verify/check_tour.py` comprueba que no son ne
 | Error máximo de dirección / posición | 1,2e-6° / 2e-9 cm |
 | Fotogramas con la cámara detrás de un portal o dentro de geometría | 0 de 9141 |
 | Control negativo (velocidad al 97 % tras el paso) | falla en las 4 puertas (3 %) |
-| Luminancia media de las capturas del Tour (0-255) | 110-185; recuadro central 171-232 |
+| Luminancia media de las capturas del Tour (0-255) | 110-185; recuadro central 171-232 (E3) |
+
+### Biomas procedurales (fase 4)
+
+Cada `ALiminalBiome` genera desde su semilla (`FRandomStream` → `LiminalTerrainMath::DeriveSeeds`) un
+terreno de 400 × 400 m a 2 m (`UProceduralMeshComponent` con colisión y color por vértice) y la
+dispersión con formas básicas del motor (un HISM por categoría, `MI_Scatter_*`), más niebla local en la
+selva y la Antártida. Son componentes transitorios: se regeneran en `OnConstruction` y en `BeginPlay`, no
+se guardan en el mapa (D-23). La puerta de vuelta y 30 m de camino de salida quedan llanos a ras del
+portal y sin dispersión. Detalle de parámetros en `docs/DECISIONES.md`, D-23 a D-27.
+
+| Bioma (semilla) | Relieve | Dispersión | Instancias |
+|---|---|---|---|
+| Selva (1001) | irregular, −5,5/+6,5 m | árboles (tronco + 1-2 copas), arbustos, sotobosque; niebla baja | 11 201 |
+| Desierto (1002) | dunas orientadas, hasta 8,1 m | rocas erosionadas (esferas y cubos aplastados), guijarros, matojos | 1539 |
+| Antártida (1003) | ondulación ±2,9 m y sastrugi | bloques y placas de hielo, montículos de nieve; neblina | 889 |
+| Cultivos (1004) | llano ±0,9 m con caballones | parcelas de color alterno, caminos, cercas, pacas, árboles aislados | 3318 |
+
+| Medida (1280×720) | Resultado |
+|---|---|
+| Generación de los cuatro biomas en `BeginPlay` | 0,36 s |
+| Calibración tras E4 (`LagFrames 0` / `1`) | 0,785 % / 16,6 % |
+| SelfTest tras E4 | 80 + 80 cruces correctos, 0 fotogramas con la cámara detrás de un portal |
+| Hueco frente al marco en las vistas de puerta (distancia RGB media) | 68-205 (umbral 20) |
+| Pared de vuelta vista desde el bioma (luminancia) | 212-220 (umbral 150, D-24) |
 
 Con el editor abierto, la compilación por línea de comandos falla por Live Coding: cerrarlo antes.
 La primera vez, clic derecho en `LiminalPortals.uproject` → *Generate Visual Studio project files*.

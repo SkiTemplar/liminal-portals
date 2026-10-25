@@ -6,15 +6,19 @@
 #include "Delegates/IDelegateInstance.h"
 
 class ALiminalCharacter;
+class ALiminalPortal;
 class APlayerController;
 class ULiminalPortalSubsystem;
 class UWorld;
 
 /**
- * Ejecución de Liminal.Tour (etapa E3 de docs/PLAN-NOCHE.md): coloca al jugador en una serie de
- * puntos de vista fijos (vista general del hub y, para cada puerta, desde el hub mirando la puerta
- * y desde el bioma mirando la puerta de vuelta), espera a que TSR y Lumen converjan y guarda la
- * captura del viewport en <Salida>/NN_<nombre>.png con un índice tour.json. Al acabar pide salir.
+ * Ejecución de Liminal.Tour (etapas E3 y E4 de docs/PLAN-NOCHE.md): coloca al jugador en una serie
+ * de puntos de vista fijos (vista general del hub y, para cada puerta, desde el hub mirando la
+ * puerta, desde el bioma mirando la puerta de vuelta y desde dentro del bioma de espaldas a la
+ * puerta), espera a que TSR y Lumen converjan y guarda la captura del viewport en
+ * <Salida>/NN_<nombre>.png con un índice tour.json. En las vistas de puerta el índice lleva los
+ * polígonos en píxeles del hueco, del marco y de la franja de pared que lo rodea (check_tour.py).
+ * Al acabar pide salir.
  *
  * Igual que Liminal.Calibrate, todo se decide en ULiminalPortalSubsystem::OnPortalsUpdated, con la
  * vista final del fotograma; la captura se resuelve en el Draw de ese mismo fotograma.
@@ -31,6 +35,11 @@ public:
 		/** Distancia de los pies al plano de la puerta, desde el hub y desde el bioma, en cm. */
 		double HubViewDistance = 350.0;
 		double BiomeViewDistance = 450.0;
+		/** Vista desde dentro del bioma: pies a esta distancia de la puerta, mirando al paisaje. */
+		double InsideViewDistance = 600.0;
+		double InsideViewPitch = -4.0;
+		/** Franja de pared alrededor del marco que se mide en las vistas de puerta, en cm. */
+		double WallBand = 50.0;
 		int32 MaxTotalFrames = 5000;
 	};
 
@@ -55,11 +64,22 @@ private:
 	struct FShot
 	{
 		FString Name;
+		/** hub, from_hub, from_biome o inside. */
+		FString Kind;
+		/** Puerta y bioma (doorN_<Tipo>); vacío en la vista general. */
+		FString Biome;
+		/** Portal que se mira (nulo en la vista general y desde dentro). */
+		TWeakObjectPtr<const ALiminalPortal> Portal;
 		FVector Feet = FVector::ZeroVector;
 		FRotator Rotation = FRotator::ZeroRotator;
 		/** Vista real del fotograma capturado. */
 		FVector ViewLocation = FVector::ZeroVector;
 		FRotator ViewRotation = FRotator::ZeroRotator;
+		FIntPoint Viewport = FIntPoint::ZeroValue;
+		/** Polígonos en píxeles del viewport: hueco, exterior del marco y exterior de la franja de pared. */
+		TArray<FVector2D> PortalCorners;
+		TArray<FVector2D> FrameCorners;
+		TArray<FVector2D> WallCorners;
 		FString Path;
 		bool bSaved = false;
 	};
@@ -72,6 +92,7 @@ private:
 	void UpdateWaitPawn();
 	bool BuildShots(FString& OutError);
 	void BeginShot(int32 Index);
+	void RecordPolygons(FShot& Shot, const FMinimalViewInfo& View) const;
 
 	void Finish(const FString& Error);
 	void Unbind();
