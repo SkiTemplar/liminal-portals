@@ -8,7 +8,7 @@ motivo para poder razonarla y revertirla.
 
 Una línea por decisión. **Revisar primero** marca las que cambian la arquitectura, se apartan del README
 original o dejan una decisión de fidelidad pendiente. P-01 a P-12 son las doce de partida de
-`docs/PLAN-NOCHE.md` («Decisiones fijadas para esta noche»); D-01 a D-31 están detalladas más abajo.
+`docs/PLAN-NOCHE.md` («Decisiones fijadas para esta noche»); D-01 a D-35 están detalladas más abajo.
 
 | ID | Decisión | Revisar primero |
 |---|---|---|
@@ -55,6 +55,10 @@ original o dejan una decisión de fidelidad pendiente. P-01 a P-12 son las doce 
 | D-29 | Método de `Liminal.Bench` y definición del coste por portal | |
 | D-30 | Palancas de coste por portal medidas y sin activar (`CaptureScale 0.73` pendiente de validar visualmente) | **Sí**: decisión de fidelidad pendiente |
 | D-31 | Liberar el estado de render de los portales lejanos sin capturar | **Sí**: ciclo de vida del render |
+| D-32 | Marcos y paredes exentas low-poly solo visuales; colisión con las cajas ocultas del blockout (`bShowFrame`) | |
+| D-33 | Arte importado con escala 1 (UE 5.6 aplica la unidad del FBX), subsistema del editor y colisión por cajas | **Sí**: contradice la escala 100 del encargo |
+| D-34 | Catálogo de arte como tabla en C++ y composición por bioma (cultivos instanciados solo cerca de la puerta) | |
+| D-35 | Terreno facetado a 2,5 m, techo de placas con cámara de 10 cm y niebla antártica más clara | |
 
 ## Pendientes de revisión
 
@@ -552,3 +556,71 @@ Las que surjan durante la implementación se añaden aquí con este formato:
   de la imagen tarda unos fotogramas en converger (el mismo caso que la primera captura de cada portal).
 - **Cómo revertir**: `Liminal.Portal.ReleaseIdleSeconds 0`, o quitar `ReleaseIdleCaptureStates` de
   `Portal/LiminalPortalSubsystem.cpp`.
+
+### D-32 · Marcos y paredes exentas low-poly solo visuales; colisión con las cajas del blockout
+
+- **Contexto**: `SM_Hub_DoorFrame_01` y `SM_ReturnWall_*` ocupan el mismo volumen que los montantes de
+  `ALiminalPortal` (forro de 12 cm en Y ∈ [70, 82]) y que las cajas de la pared exenta: dibujar las dos cosas da
+  z-fighting, y la colisión simple automática de una malla en U (caja o k-DOP) taparía el hueco de 140 × 230.
+- **Elegida**: las mallas no colisionan. Las cajas de la pared exenta (`LiminalWorldLayout`, con test) siguen como
+  colisión, ocultas (`SetVisibility(false)`); el portal tiene `bShowFrame` (por defecto `true`; `false` en los 8
+  portales de `L_Hub`) que oculta montantes y dintel sin quitarles la colisión ni la sombra
+  (`bCastHiddenShadow`: sin ella el sol entraba por los lados del túnel, entre la pared y la placa trasera, y
+  dejaba franjas de luz en la moqueta del hub). SelfTest sin cambios: 160 cruces, 0 fotogramas con la cámara
+  dentro de geometría.
+- **Alternativas**: cajas de colisión a mano en el asset (`KBoxElem` desde `import_art.py`; duplica la geometría
+  del hueco fuera del C++ con test); UCX en el FBX desde Blender (cambia los scripts de los kits).
+- **Coste**: por detrás de la pared exenta, entre su cara trasera (−27 cm) y la placa (−60 cm), el túnel queda
+  abierto a la vista (no lo mira ninguna prueba).
+- **Cómo revertir**: `show_frame` en `spawn_portal` de `build_content.py`; `ReturnWall->SetVisibility` en
+  `World/LiminalBiome.cpp`.
+
+### D-33 · Importación del arte: escala 1, subsistema del editor y colisión por cajas
+
+- **Contexto**: el encargo y `docs/ARTE.md` pedían `import_uniform_scale = 100` (papercut de Explored).
+- **Elegida**: escala 1. Medido: con 100, `SM_Crops_FenceSection_01` salía de 1617 × 30 621 × 13 000 uu frente a
+  los 16 × 306 × 130 cm del informe; UE 5.6 aplica el `UnitScaleFactor = 100` del FBX. Con 1, las 81 mallas casan
+  con `packs_report.json` y `kits_report.json` con error 0 (tolerancia ±2 %), con Y invertida. En el commandlet,
+  `EditorStaticMeshLibrary` falla en silencio (devuelve −1) porque el módulo `StaticMeshEditor` no está cargado:
+  `import_art.py` hace `unreal.load_module("StaticMeshEditor")` y usa `StaticMeshEditorSubsystem`. El k-DOP y la
+  descomposición convexa salen vacíos sin datos de render, así que las rocas, troncos caídos, bloques de hielo,
+  icebergs y granero llevan la caja del bounding box, los árboles una cápsula en el tronco (35 o 25 cm) y el arco
+  tres cajas que dejan el hueco. Ningún asset necesitó arreglos en Blender (pivote, escala y normales correctos).
+- **Alternativas**: importar desde el editor abierto (k-DOP real; no es reproducible por script sin interfaz).
+- **Cómo revertir**: `IMPORT_SCALE` y `COLLISION_RULES` en `Tools/Content/import_art.py`.
+
+### D-34 · Dispersión con el catálogo de arte: tabla en C++ y composición por bioma
+
+- **Contexto**: la dispersión tenía que elegir mallas por categoría con variantes y un mapeo editable que no rompiera
+  la generación desde Python.
+- **Elegida**: `World/LiminalArtCatalog.cpp`: tabla de nombres por categoría (28 categorías, 63 mallas), piezas del
+  hub y paredes de vuelta; la ruta sale del nombre (`SM_<Kit>_…` → `/Game/Art/<Kit>/`). La variante sale del hash
+  de cada punto (`LiminalScatterMath::PickVariant`) y los hitos colocados a mano van por turno, de modo que todas
+  aparecen (test). `ALiminalBiome` crea un HISM por categoría y variante y carga las mallas por ruta (D-03); Python
+  solo comprueba que existen (`GetArtMeshNames`). Composición: hitos a mano en el cono de la vista desde el hub
+  (±12°): meseta y arco del desierto, icebergs centrales, afloramientos oscuros, granero y dos árboles; el resto
+  en rejillas con jitter y manchas. Los cultivos solo se instancian en las parcelas a menos de ~70 m de la puerta
+  (X ∈ [−15, 70] m, |Y| ≤ 30 m) con distancia de desaparición de 60-90 m; más allá, la parcela es el color del
+  terreno. Cercas del camino a 7,5 m del eje (fuera de la cápsula de exclusión de 7 m, que no cambia).
+- **Alternativas**: `UDataAsset` editable en el editor (otro asset que crear y versionar desde Python, y la
+  dispersión pura dejaría de poder testear el número de variantes sin cargarlo); ajustes en `DefaultGame.ini`.
+- **Cifras** (semillas 1001-1004): selva 8977 instancias y 5,76 M triángulos (2361 y 2,94 M dentro de su distancia
+  de desaparición vista desde la puerta), desierto 1961 (0,63 M; 807 y 0,30 M), Antártida 966 (0,06 M; 448 y
+  0,03 M), cultivos 4889 (1,28 M; 3666 y 1,09 M). Coste por portal a 1080p: 4,32-4,56 ms (límite 5,1).
+- **Cómo revertir**: `World/LiminalArtCatalog.*`, recetas en `World/LiminalScatterMath.cpp`.
+
+### D-35 · Terreno facetado a 2,5 m, techo de placas con cámara y niebla antártica más clara
+
+- **Contexto**: la dirección low-poly pide caras planas; el hub nuevo tiene placas y paneles que miden hasta 9 cm
+  hacia arriba; los icebergs del horizonte de la Antártida quedaban borrados por la niebla de D-25.
+- **Elegida**: terreno con tres vértices por triángulo (normal y color de la cara, ±4 % de brillo por cara) y
+  rejilla de 2,5 m (antes 2 m suavizada: 153 600 vértices frente a 40 401); colores de la paleta de
+  `docs/ARTE.md` en lineal (la nieve usa sobre todo `#DDE7EF`: `#F4F7FA` se satura con el sol compartido). Las
+  instancias se apoyan en la superficie triangulada (`SampleSurfaceHeight`, con test), no en el campo continuo.
+  Hub: `CeilingPlenum = 10 cm` entre el plano de las placas (320 cm) y la losa; las paredes suben hasta la losa.
+  Antártida: densidad radial de la niebla de 2 a 0,8. Desviación de luminancia en el hueco de la puerta de la
+  Antártida vista desde el hub: 7,4 → 19,1; desviación de toda la vista desde dentro: 26,0 (12,4 con el arte nuevo y la niebla anterior).
+- **Alternativas**: normales suavizadas con color por cara (no da facetas visibles con luz rasante); mantener 2 m
+  (más facetas pequeñas, 1,5 veces más vértices).
+- **Cómo revertir**: `BuildTerrainMesh` en `World/LiminalTerrainMath.cpp`, `TerrainSpacing` en
+  `World/LiminalBiome.h`, `CeilingPlenum` en `World/LiminalWorldLayout.h`, `GetBiomeFog` en `World/LiminalBiome.cpp`.

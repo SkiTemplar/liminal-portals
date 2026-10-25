@@ -14,10 +14,10 @@ ficheros en `Saved/`). El detalle de cada medida está en la sección «Medidas�
 
 | Fase | Estado | Evidencia |
 |---|---|---|
-| 1. Portal fijo hub → caja desplazada | Hecha | Calibración: 0,79 % de diferencia en la máscara sin retraso frente a 16,6 % con un fotograma de retraso (ratio 20,9; aceptación < 2 % y ratio > 3). 52 Automation Tests en verde |
+| 1. Portal fijo hub → caja desplazada | Hecha | Calibración: 0,79 % de diferencia en la máscara sin retraso frente a 16,6 % con un fotograma de retraso (ratio 20,9; aceptación < 2 % y ratio > 3); con el arte low-poly, 0,85 % (ratio 19,6). 58 Automation Tests en verde |
 | 2. Cruce en los dos sentidos | Hecha | `Liminal.SelfTest`: 80 cruces hub → bioma y 80 bioma → hub correctos; error máximo del módulo de la velocidad 1,4e-14 %; 0 de 9141 fotogramas con la cámara detrás de un portal o dentro de geometría. El parpadeo se comprueba por la posición de la cámara, no por imagen |
 | 3. Hub con 4 puertas y biomas en *blockout* | Hecha | 4 puertas y 8 portales enlazados en `L_Hub`; `Liminal.Tour` (13 capturas) pasa `check_tour.py`; coste por portal anotado (con `FRHIGPUFrameTimeHistory` en lugar de `stat gpu`, D-29) |
-| 4. Biomas procedurales | Hecha, con desviación | Cada bioma sale de su semilla con generación en C++ (no PCG) y formas básicas del motor (sin assets externos); tests de determinismo del terreno y de la dispersión; lámina `Saved/Tour/lamina.png` |
+| 4. Biomas procedurales | Hecha, con desviación | Cada bioma sale de su semilla con generación en C++ (no PCG) y el arte low-poly de `/Game/Art` (packs CC0 recoloreados y kits propios, D-32 a D-35); tests de determinismo, variantes y exclusión; lámina `Saved/Tour/lamina.png` |
 | 5. Pulido y medidas | Parcial | Coste por portal medido: 4,40-4,46 ms de GPU a 1080p, por encima del objetivo provisional de 4 ms. Experimentos de iluminación 1a/1b pendientes: 1a está en uso sin medida comparativa y 1b no se ha probado |
 
 ## Objetivo
@@ -128,17 +128,20 @@ Source/LiminalPortals/
   World/LiminalHub.*                     ALiminalHub (OnConstruction)
   World/LiminalBiome.*, LiminalBiomeTypes.h   ALiminalBiome: terreno, dispersión y niebla por tipo y semilla
   World/LiminalTerrainMath.*             campo de alturas, color y malla del terreno (puras)
-  World/LiminalScatterMath.*             dispersión determinista con exclusiones (pura)
+  World/LiminalScatterMath.*             dispersión determinista con variantes y exclusiones (pura)
+  World/LiminalArtCatalog.*              catálogo del arte: mallas por categoría, piezas del hub y paredes de vuelta
+  World/LiminalHubDressing.*             atrezo del hub con el kit low-poly (puro)
   Debug/LiminalDebugCommands.*           registro de las órdenes Liminal.*
   Debug/LiminalCalibration*.*            Liminal.Calibrate y su matemática pura
   Debug/LiminalSelfTest*.*               Liminal.SelfTest y sus comprobaciones puras
   Debug/LiminalTour.*                    Liminal.Tour
   Debug/LiminalBench*.*                  Liminal.Bench, estadísticos y poses fijas
   Debug/LiminalDebugWorld.*, LiminalDebugShared.h   utilidades comunes de las ejecuciones de depuración
-  Tests/*.cpp                            Automation Tests (52)
+  Tests/*.cpp                            Automation Tests (58)
 Tools/
   build.ps1, test.ps1, content.ps1, verify.ps1, common.ps1
   Content/build_content.py, content_utils.py   materiales y mapas creados por script
+  Content/import_art.py                  importación del arte de Art/Export a /Game/Art
   Verify/compare_calibration.py, check_tour.py, make_lamina.py (+ tests de Python)
 ```
 
@@ -167,11 +170,14 @@ powershell -File Tools/test.ps1 [-Filter <prefijo>]   # Automation Tests sin int
 ### Regenerar contenido
 
 ```powershell
-powershell -File Tools/content.ps1
+powershell -File Tools/content.ps1 [-Mode All|Art|Content]
 ```
 
-Lanza `UnrealEditor-Cmd -run=pythonscript` con `Tools/Content/build_content.py` (idempotente) y
-comprueba `Saved/Content/build_content.json`. Crea los materiales (`M_PortalSurface`, `M_PortalFallback`,
+`-Mode Art` lanza `Tools/Content/import_art.py`: importa los FBX de `Art/Export/<Kit>/` (no versionados; se
+regeneran con `Tools/Art`) en `/Game/Art/<Kit>/` con `M_LowPoly`, comprueba el bounding box contra los informes
+(±2 %) y solo reimporta los que cambian (`Saved/Content/import_art.json`). `-Mode Content` lanza
+`UnrealEditor-Cmd -run=pythonscript` con `Tools/Content/build_content.py` (idempotente) y
+comprueba `Saved/Content/build_content.json`; `All` (por defecto) hace los dos. Crea los materiales (`M_PortalSurface`, `M_PortalFallback`,
 `M_Basic`, `M_Terrain` y sus instancias), `/Game/Maps/L_Calibration` y `/Game/Maps/L_Hub` (hub, cuatro
 biomas, ocho portales enlazados, sol, cielo, `SkyLight` y post-process global). Hay que cerrar el editor
 antes (bloquea los paquetes). Cuándo regenerar:
@@ -250,18 +256,18 @@ y cuatro puertas de 140 × 230 cm al tresbolillo (D-16). La geometría sale de f
 ### Biomas procedurales (fase 4)
 
 Cada `ALiminalBiome` genera desde su semilla (`FRandomStream` → `LiminalTerrainMath::DeriveSeeds`) un
-terreno de 400 × 400 m a 2 m (`UProceduralMeshComponent` con colisión y color por vértice) y la
-dispersión con formas básicas del motor (un HISM por categoría, `MI_Scatter_*`), más niebla local en la
-selva y la Antártida. Son componentes transitorios: se regeneran en `OnConstruction` y en `BeginPlay`, no
+terreno facetado de 400 × 400 m a 2,5 m (`UProceduralMeshComponent` con colisión, normal y color por cara) y
+la dispersión de las mallas low-poly de `/Game/Art` (un HISM por categoría y variante; catálogo en
+`World/LiminalArtCatalog.cpp`), más niebla local en la selva y la Antártida. Son componentes transitorios: se regeneran en `OnConstruction` y en `BeginPlay`, no
 se guardan en el mapa (D-23). La puerta de vuelta y 30 m de camino de salida quedan llanos a ras del
 portal y sin dispersión. Detalle de parámetros en `docs/DECISIONES.md`, D-23 a D-28.
 
-| Bioma (semilla) | Relieve | Dispersión | Instancias |
-|---|---|---|---|
-| Selva (1001) | irregular, −5,5/+6,5 m | árboles (tronco + 1-2 copas), arbustos, sotobosque; niebla baja | 11 201 |
-| Desierto (1002) | dunas orientadas, hasta 8,1 m | rocas erosionadas (esferas y cubos aplastados), guijarros, matojos | 1539 |
-| Antártida (1003) | ondulación ±2,9 m y sastrugi | bloques y placas de hielo, montículos de nieve; neblina | 889 |
-| Cultivos (1004) | llano ±0,9 m con caballones | parcelas de color alterno, caminos, cercas, pacas, árboles aislados | 3318 |
+| Bioma (semilla) | Relieve | Dispersión | Instancias (triángulos) | Desde la puerta (D-34) |
+|---|---|---|---|---|
+| Selva (1001) | irregular, −5,5/+6,5 m | árboles altos, arbustos, helechos y flores (más densos en el borde del claro), troncos caídos; niebla baja | 8977 (5,76 M) | 2361 (2,94 M) |
+| Desierto (1002) | dunas orientadas, hasta 8,1 m | tres mesetas y un arco como hitos, corros de rocas, cactus, matorral, guijarros | 1961 (0,63 M) | 807 (0,30 M) |
+| Antártida (1003) | ondulación ±2,9 m y sastrugi | icebergs y seracs en el horizonte, crestas de presión, bloques y esquirlas, montículos, afloramientos oscuros; neblina | 966 (0,06 M) | 448 (0,03 M) |
+| Cultivos (1004) | llano ±0,9 m con caballones | trigo, maíz y filas verdes cerca de la puerta, cercas, balas, espantapájaros, granero, árboles sueltos | 4889 (1,28 M) | 3666 (1,09 M) |
 
 | Medida (1280×720, `Liminal.Tour` tras E6) | Resultado |
 |---|---|
@@ -337,9 +343,10 @@ medible (4,18-4,37 ms).
 
 ## Assets
 
-Sin assets externos por ahora: formas básicas del motor y materiales creados por script. Por decidir:
-Fab (Megascans), CC0 (Poly Haven, Quaternius, Kenney) o kits propios en Blender con el agente
-`technical-artist`. Estilo: escena liminal, limpia y algo irreal, no fotorrealismo de catálogo.
+Arte low-poly estilizado (`docs/ARTE.md`): vegetación y rocas de packs CC0 (Quaternius, Kenney) recoloreadas
+a la paleta de cada bioma y kits propios generados en Blender (hub, marcos, paredes exentas, hielo y
+cultivos), 81 mallas en `/Game/Art` con un único material de color de vértice (`M_LowPoly`). Con el arte, el
+coste por portal a 1080p es de 4,32-4,56 ms (4,40-4,46 ms con las formas básicas; límite del encargo 5,1 ms).
 
 ## Fuera de alcance
 
