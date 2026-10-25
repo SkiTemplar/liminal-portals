@@ -432,6 +432,11 @@ bool FLiminalCalibrationRun::WriteReport(const FString& Error) const
 	Root->SetNumberField(TEXT("flipClipPlane"), GetIntCVar(TEXT("Liminal.Portal.FlipClipPlane"), -1));
 	Root->SetNumberField(TEXT("antiAliasingMethod"), GetIntCVar(TEXT("r.AntiAliasingMethod"), -1));
 	Root->SetNumberField(TEXT("screenPercentage"), GetFloatCVar(TEXT("r.ScreenPercentage"), -1.f));
+	// Experimentos de coste de E5 (D-30): escala y reflejos de la captura, y render target del último fotograma.
+	Root->SetNumberField(TEXT("captureScale"), GetFloatCVar(TEXT("Liminal.Portal.CaptureScale"), -1.f));
+	Root->SetNumberField(TEXT("captureReflectionMethod"), GetIntCVar(TEXT("Liminal.Portal.CaptureReflectionMethod"), -2));
+	const FIntPoint CaptureSize = Subsystem.IsValid() ? Subsystem->GetLastCaptureSize() : FIntPoint::ZeroValue;
+	Root->SetArrayField(TEXT("captureSize"), LiminalDebugShared::ToJsonArray({ static_cast<double>(CaptureSize.X), static_cast<double>(CaptureSize.Y) }));
 	Root->SetNumberField(TEXT("stepDegrees"), Config.StepDegrees);
 	Root->SetNumberField(TEXT("framesPerPass"), YawSweep.Num());
 	Root->SetNumberField(TEXT("savedScreenshots"), SavedScreenshots);

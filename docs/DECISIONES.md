@@ -418,3 +418,54 @@ Las que surjan durante la implementación se añaden aquí con este formato:
   Lumen (actúa sobre la oclusión, que no es la causa principal).
 - **Cómo revertir**: `HUB_SKY_INTENSITY = 1.0` y regenerar `L_Hub` (`Tools/content.ps1`); colores de la
   selva en `World/LiminalTerrainMath.cpp`; `MAX_DARK_FOREGROUND` en `Tools/Verify/check_tour.py`.
+
+### D-29 · Método de Liminal.Bench
+
+- **Contexto**: el plan pide el tiempo de GPU con 0, 1, 2 y 4 portales visibles en posiciones fijas, sin
+  fijar la fuente del tiempo, las poses ni cómo se calcula el coste por portal.
+- **Elegida**: cinco poses fijas en coordenadas del hub (`LiminalBenchMath::MakeHubBenchPoses`): de cara a la
+  pared del fondo (0), a 1,5 m de la puerta de X = +100 (1), desde −Y mirando a la pared de +Y (2), desde el
+  fondo pegado a −Y y girado 15° (4, las cuatro en pantalla) y esa misma vista con `Liminal.Portals.Enable 0`.
+  Un test comprueba que las cinco dan 0, 1, 2, 4 y 4 portales con el test de visibilidad del subsistema y en
+  pantalla para aspectos de 4:3 a 21:9 (margen ≥ 12° respecto al límite del cono). En ejecución, cada fotograma
+  medido exige `GetLastCaptureCount` igual al esperado. Calentamiento de 120 fotogramas (360 en el primer caso)
+  y 240 medidos por caso. GPU: `FRHIGPUFrameTimeHistory::FState::PopFrameCycles`, la serie por fotograma de la
+  que sale `RHIGetGPUFrameCycles` (leer `RHIGetGPUFrameCycles` una vez por tick repite o salta fotogramas);
+  CPU: `GRenderThreadTime` y `GGameThreadTime`. Lo mueve el ticker del núcleo, porque con los portales apagados
+  el subsistema no emite `OnPortalsUpdated`. Coste por portal principal: (caso 4 − caso apagado) / 4, misma
+  vista; secundario: pendiente de mínimos cuadrados de 0, 1, 2 y 4 (cada caso mira otra cosa, así que mezcla
+  el coste de la vista). `verify.ps1 -Bench`: 1920 × 1080 en ventana, `r.VSync 0`, `t.MaxFPS 0`, dos
+  ejecuciones y aviso si el coste por portal difiere un 25 % o más.
+- **Observaciones**: el tiempo de render thread coincide con el del fotograma (11-31 ms): con la GPU como
+  cuello de botella incluye la espera a la GPU, así que no mide el coste de CPU de las capturas. La vista
+  principal se renderiza al 73 % (modo de pantalla `BasedOnDisplayResolution` de UE 5.6 a 1080p) y TSR la
+  escala; las capturas se renderizan al 100 % del render target, sin TSR.
+- **Alternativas**: `stat gpu` o `ProfileGPU` (por pase, pero hay que procesar el texto); medir con
+  `Liminal.Portals.Enable 0` en cada pose (más casos, mismo resultado que el emparejado).
+- **Cómo revertir**: `Debug/LiminalBench*`, `Invoke-Bench` en `Tools/verify.ps1`.
+
+### D-30 · Palancas de coste por portal: medidas y sin activar
+
+- **Contexto**: a 1080p el coste por portal es de 4,29-4,43 ms (cuatro ejecuciones), por encima del objetivo
+  provisional de 4 ms. El plan permite probar dos palancas baratas, medirlas con la calibración y no dejar
+  activa ninguna que rompa la calibración (< 2 %).
+- **Medido** (`Saved/BenchLevers/`, dos ejecuciones de `-Bench` por palanca):
+
+  | Palanca | Coste por portal (GPU) | Calibración 1280 × 720 | Calibración 1920 × 1080 |
+  |---|---|---|---|
+  | Ninguna | 4,29-4,43 ms | 0,82-0,85 % | 0,93 % |
+  | `Liminal.Portal.CaptureScale 0.73` (render target 1402 × 788, la resolución interna de la vista principal) | 3,15-3,22 ms | 0,77 % | 0,81 % |
+  | `Liminal.Portal.CaptureReflectionMethod 2` (reflejos en pantalla en lugar de Lumen) | 4,18-4,37 ms | 0,77 % | — |
+
+- **Elegida**: ninguna activada; las dos quedan como CVars de experimento. Los reflejos no ahorran nada medible
+  (la diferencia cae dentro del ruido entre ejecuciones). La escala sí baja el coste un 26 % y deja la
+  calibración en verde, pero la métrica de la calibración no sirve para juzgarla: con menos resolución la
+  diferencia **baja** (0,93 → 0,81 % a 1080p) porque el residuo es ruido de Lumen que el reescalado promedia, y
+  la sala de calibración, de bloques de color planos, apenas tiene bordes que se emborronen. Bajar la
+  resolución del portal es un cambio de fidelidad visible que debe validar Rodrigo con una captura.
+- **Alternativas**: activar `RenderTargetScale = 0.73` en `Config/DefaultGame.ini` (cumple los 4 ms a 1080p,
+  pero el valor solo vale para 1080p: a 720p la vista principal va al 100 %); seguir la fracción de resolución
+  de la vista principal en cada fotograma (lo más correcto; más código); bajar la calidad de Lumen en la
+  captura (`LumenFinalGatherQuality`, `LumenSceneLightingQuality`), fuera del límite de dos palancas.
+- **Cómo activar**: `RenderTargetScale=0.73` en `[/Script/LiminalPortals.LiminalPortalsSettings]` de
+  `Config/DefaultGame.ini`, o `Liminal.Portal.CaptureScale 0.73` en consola.

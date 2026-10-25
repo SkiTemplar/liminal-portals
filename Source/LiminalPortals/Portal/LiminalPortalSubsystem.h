@@ -60,6 +60,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Liminal|Portals")
 	int32 GetLastCaptureCount() const { return LastCaptureCount; }
 
+	/** Tamaño del render target de las capturas del último fotograma que capturó algo ((0, 0) si ninguno). */
+	FIntPoint GetLastCaptureSize() const { return LastCaptureSize; }
+
 	/** Teletransportes desde que empezó el mundo. */
 	UFUNCTION(BlueprintPure, Category = "Liminal|Portals")
 	int32 GetTeleportCount() const { return TeleportCount; }
@@ -91,5 +94,6 @@ private:
 	TArray<FMinimalViewInfo> ViewHistory;
 
 	int32 LastCaptureCount = 0;
+	FIntPoint LastCaptureSize = FIntPoint::ZeroValue;
 	int32 TeleportCount = 0;
 };

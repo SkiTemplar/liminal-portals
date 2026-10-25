@@ -34,6 +34,13 @@ namespace
 		TEXT("Diagnóstico de calibración: invierte la normal del clip plane de las capturas (1 = invertida)."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<int32> CVarCaptureReflectionMethod(
+		TEXT("Liminal.Portal.CaptureReflectionMethod"),
+		-1,
+		TEXT("Experimento de coste (E5, D-30): método de reflejos de las capturas (-1 = el del proyecto, 0 = ninguno, ")
+		TEXT("1 = Lumen, 2 = pantalla)."),
+		ECVF_Default);
+
 	void PlaceBox(UStaticMeshComponent* Component, const FVector& Center, const FVector& Size)
 	{
 		Component->SetRelativeLocation(Center);
@@ -79,9 +86,11 @@ namespace
 		Settings.bOverride_DynamicGlobalIlluminationMethod = true;
 		Settings.DynamicGlobalIlluminationMethod = static_cast<EDynamicGlobalIlluminationMethod::Type>(
 			GIMethod ? GIMethod->GetValueOnGameThread() : EDynamicGlobalIlluminationMethod::Lumen);
+		const int32 CaptureReflection = CVarCaptureReflectionMethod.GetValueOnGameThread();
+		const bool bOverrideReflection = CaptureReflection >= EReflectionMethod::None && CaptureReflection <= EReflectionMethod::ScreenSpace;
+		const int32 ProjectReflection = ReflectionMethod ? ReflectionMethod->GetValueOnGameThread() : EReflectionMethod::Lumen;
 		Settings.bOverride_ReflectionMethod = true;
-		Settings.ReflectionMethod = static_cast<EReflectionMethod::Type>(
-			ReflectionMethod ? ReflectionMethod->GetValueOnGameThread() : EReflectionMethod::Lumen);
+		Settings.ReflectionMethod = static_cast<EReflectionMethod::Type>(bOverrideReflection ? CaptureReflection : ProjectReflection);
 		// La caché de superficies de la captura va por defecto a media resolución; la vista principal, a 1.
 		Settings.bOverride_LumenSurfaceCacheResolution = true;
 		Settings.LumenSurfaceCacheResolution = 1.f;

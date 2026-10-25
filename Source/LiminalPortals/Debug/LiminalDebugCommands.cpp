@@ -1,5 +1,6 @@
 #include "Debug/LiminalDebugCommands.h"
 
+#include "Debug/LiminalBench.h"
 #include "Debug/LiminalCalibration.h"
 #include "Debug/LiminalSelfTest.h"
 #include "Debug/LiminalTour.h"
@@ -23,8 +24,13 @@ namespace
 	TUniquePtr<FLiminalCalibrationRun> GCalibrationRun;
 	TUniquePtr<FLiminalSelfTestRun> GSelfTestRun;
 	TUniquePtr<FLiminalTourRun> GTourRun;
+	TUniquePtr<FLiminalBenchRun> GBenchRun;
 
 	constexpr int32 MaxSelfTestCycles = 1000;
+	/** Mínimos de Liminal.Bench fijados por el plan (E5) y tope para no dejar la ejecución colgada. */
+	constexpr int32 MinBenchMeasureFrames = 120;
+	constexpr int32 MinBenchWarmupFrames = 60;
+	constexpr int32 MaxBenchFrames = 5000;
 
 	/** El mundo que pasa la consola puede ser nulo con -ExecCmds: se busca el primer mundo de juego. */
 	UWorld* ResolveGameWorld(UWorld* World)
@@ -81,6 +87,31 @@ namespace
 			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Tour: %s"), *Error);
 		}
 	}
+
+	void RunBenchCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		const FLiminalBenchRun::FConfig Defaults;
+		int32 MeasureFrames = Defaults.MeasureFrames;
+		int32 WarmupFrames = Defaults.WarmupFrames;
+		const bool bParsed = (Args.Num() < 1 || LexTryParseString(MeasureFrames, *Args[0]))
+			&& (Args.Num() < 2 || LexTryParseString(WarmupFrames, *Args[1]));
+		if (!bParsed)
+		{
+			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Bench: uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento]"));
+			return;
+		}
+		FString Error;
+		if (!LiminalDebugCommands::StartBench(World, MeasureFrames, WarmupFrames, Error))
+		{
+			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Bench: %s"), *Error);
+		}
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs BenchCommand(
+		TEXT("Liminal.Bench"),
+		TEXT("Mide en L_Hub el tiempo de GPU, render thread y game thread con 0, 1, 2 y 4 portales visibles y con los ")
+		TEXT("portales apagados; escribe Saved/Bench.json y sale. Uso: Liminal.Bench [Medidos >= 120] [Calentamiento >= 60]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunBenchCommand));
 
 	FAutoConsoleCommandWithWorldAndArgs SelfTestCommand(
 		TEXT("Liminal.SelfTest"),
@@ -212,6 +243,43 @@ namespace LiminalDebugCommands
 			return false;
 		}
 		GTourRun = MoveTemp(Run);
+		return true;
+	}
+
+	bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, FString& OutError)
+	{
+		if (GBenchRun && !GBenchRun->IsFinished())
+		{
+			OutError = TEXT("ya hay una medida en curso");
+			return false;
+		}
+		if (MeasureFrames < MinBenchMeasureFrames || MeasureFrames > MaxBenchFrames
+			|| WarmupFrames < MinBenchWarmupFrames || WarmupFrames > MaxBenchFrames)
+		{
+			OutError = FString::Printf(TEXT("fotogramas fuera de rango: medidos %d (%d-%d), calentamiento %d (%d-%d)"),
+				MeasureFrames, MinBenchMeasureFrames, MaxBenchFrames, WarmupFrames, MinBenchWarmupFrames, MaxBenchFrames);
+			return false;
+		}
+		UWorld* GameWorld = ResolveGameWorld(World);
+		if (!GameWorld)
+		{
+			OutError = TEXT("no hay mundo de juego");
+			return false;
+		}
+
+		FLiminalBenchRun::FConfig Config;
+		Config.OutputPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Bench.json")));
+		Config.MeasureFrames = MeasureFrames;
+		Config.WarmupFrames = WarmupFrames;
+		Config.MaxTotalFrames = 5 * (2 * MeasureFrames + WarmupFrames + 600) + Config.FirstCaseExtraWarmup + 1000;
+
+		GBenchRun.Reset();
+		TUniquePtr<FLiminalBenchRun> Run = MakeUnique<FLiminalBenchRun>(GameWorld, Config);
+		if (!Run->Start(OutError))
+		{
+			return false;
+		}
+		GBenchRun = MoveTemp(Run);
 		return true;
 	}
 }

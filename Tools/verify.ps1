@@ -12,20 +12,32 @@
 #               desde el hub, desde el bioma y desde dentro), las comprueba con Tools/Verify/check_tour.py
 #               (luminancia, desviación y hueco distinto del marco; Saved/Tour/result.json) y compone
 #               Saved/Tour/lamina.png con Tools/Verify/make_lamina.py.
+#   -Bench      Etapa E5: lanza /Game/Maps/L_Hub a -BenchResX x -BenchResY (1920x1080 por defecto; si la
+#               pantalla principal no lo admite, el mayor 16:9 que quepa) en ventana, con r.VSync 0 y
+#               t.MaxFPS 0, y ejecuta Liminal.Bench dos veces (Saved/Bench_run1.json y Bench_run2.json; el
+#               último queda en Saved/Bench.json). Falla si algún caso no tiene las capturas esperadas;
+#               avisa si el coste por portal difiere un 25 % o más entre ejecuciones. Resumen en
+#               Saved/BenchResult.json.
 #   -ExecCmds   Órdenes de consola extra antes de la verificación (p. ej. 'r.AntiAliasingMethod 1').
 #
-# Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-ExecCmds '...']
+# Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-Bench] [-ExecCmds '...']
 param(
     [switch]$Calibrate,
     [switch]$ClipPlaneCheck,
     [switch]$SelfTest,
     [switch]$SelfTestNegative,
     [switch]$Tour,
+    [switch]$Bench,
     [string]$ExecCmds = '',
     [int]$SelfTestCycles = 20,
     [int]$TimeoutMinutes = 45,
     [int]$ResX = 1280,
-    [int]$ResY = 720
+    [int]$ResY = 720,
+    [int]$BenchResX = 1920,
+    [int]$BenchResY = 1080,
+    [int]$BenchFrames = 240,
+    [int]$BenchWarmup = 120,
+    [double]$BenchMaxRelativeDiff = 0.25
 )
 . "$PSScriptRoot\common.ps1"
 
@@ -35,10 +47,11 @@ $HubMap = '/Game/Maps/L_Hub'
 $NumDoors = 4
 
 # Lanza el juego con RHI en $Map, ejecuta $Commands y espera a que salga solo (con tiempo máximo).
-function Invoke-GameRun([string]$Map, [string[]]$Commands, [string]$LogName, [string[]]$ExtraArgs = @()) {
+function Invoke-GameRun([string]$Map, [string[]]$Commands, [string]$LogName, [string[]]$ExtraArgs = @(),
+        [int]$Width = $ResX, [int]$Height = $ResY) {
     $logPath = Join-Path $ProjectRoot "Saved\Logs\$LogName.log"
     $exec = (@($Commands) | Where-Object { $_ }) -join ','
-    $cmdArgs = @("`"$UProject`"", $Map, '-game', '-windowed', "-ResX=$ResX", "-ResY=$ResY", '-ForceRes',
+    $cmdArgs = @("`"$UProject`"", $Map, '-game', '-windowed', "-ResX=$Width", "-ResY=$Height", '-ForceRes',
         '-NoSound', '-nosplash', '-unattended', "-ExecCmds=`"$exec`"", '-log', "-ABSLOG=`"$logPath`"") + $ExtraArgs
     Write-Host "== $LogName ($exec)"
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -146,8 +159,87 @@ function Invoke-Tour([string[]]$ExtraCommands) {
     Write-Host "Lámina: $lamina"
 }
 
-if (-not ($Calibrate -or $SelfTest -or $Tour)) {
-    Write-Output 'Nada que verificar: usa -Calibrate, -SelfTest o -Tour.'
+# Resolución de la medida: la pedida si cabe en la pantalla principal (píxeles físicos); si no, el mayor 16:9.
+function Get-BenchResolution {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -Namespace LiminalBench -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+    [void][LiminalBench.Dpi]::SetProcessDPIAware()
+    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    if ($bounds.Width -ge $BenchResX -and $bounds.Height -ge $BenchResY) { return @($BenchResX, $BenchResY, $bounds) }
+    $width = [Math]::Min($bounds.Width, [Math]::Floor($bounds.Height * 16 / 9))
+    $width -= $width % 16
+    return @([int]$width, [int]($width * 9 / 16), $bounds)
+}
+
+function Get-RelativeDifference([double]$A, [double]$B) {
+    $scale = [Math]::Max([Math]::Abs($A), [Math]::Abs($B))
+    if ($scale -le 1e-9) { return 0.0 }
+    return [Math]::Abs($A - $B) / $scale
+}
+
+function Invoke-BenchRun([int]$Run, [int]$Width, [int]$Height, [string[]]$ExtraCommands) {
+    $report = Join-Path $ProjectRoot 'Saved\Bench.json'
+    if (Test-Path $report) { Remove-Item $report -Force }
+    $commands = @($ExtraCommands) + @('r.VSync 0', 't.MaxFPS 0', "Liminal.Bench $BenchFrames $BenchWarmup")
+    $logPath = Invoke-GameRun $HubMap $commands "Bench_run$Run" @() $Width $Height
+    if (-not (Test-Path $report)) { throw "Liminal.Bench no escribió $report (log: $logPath)" }
+    Copy-Item $report (Join-Path $ProjectRoot "Saved\Bench_run$Run.json") -Force
+
+    $data = Get-Content $report -Raw -Encoding UTF8 | ConvertFrom-Json
+    Write-Host ("   {0}, {1}, viewport {2}x{3}, render target {4}x{5}, r.VSync {6}, t.MaxFPS {7}" -f $data.gpu, $data.rhi,
+        $data.viewport[0], $data.viewport[1], $data.renderTarget[0], $data.renderTarget[1], $data.cvars.'r.VSync', $data.cvars.'t.MaxFPS')
+    foreach ($case in $data.cases) {
+        $mark = if ($case.capturesOk) { 'OK  ' } else { 'FAIL' }
+        Write-Host ("{0} {1,-18} capturas {2}-{3} (esperadas {4}); GPU media {5:N3} p50 {6:N3} p95 {7:N3} ms; RT {8:N3} ms; GT {9:N3} ms" -f $mark,
+            $case.name, $case.minCaptures, $case.maxCaptures, $case.expectedCaptures, $case.gpuMs.mean, $case.gpuMs.p50,
+            $case.gpuMs.p95, $case.renderThreadMs.mean, $case.gameThreadMs.mean)
+    }
+    $failed = @($data.cases | Where-Object { -not $_.capturesOk }).Count
+    if (-not $data.complete -or @($data.cases).Count -ne 5 -or $failed -gt 0) {
+        throw "Liminal.Bench (ejecución $Run) incompleto: $($data.error) (casos $(@($data.cases).Count), con capturas incorrectas $failed; log: $logPath)"
+    }
+    if ($data.cvars.'r.VSync' -ne '0' -or $data.cvars.'t.MaxFPS' -ne '0') {
+        throw "Liminal.Bench (ejecución $Run) no se midió con r.VSync 0 y t.MaxFPS 0"
+    }
+    Write-Host ("   por portal: GPU {0:N3} ms (4 frente a apagados), pendiente {1:N3} ms; RT {2:N3} ms" -f $data.perPortal.gpuMsPaired,
+        $data.perPortal.gpuMsSlope, $data.perPortal.renderThreadMsPaired)
+    return $data
+}
+
+function Invoke-Bench([string[]]$ExtraCommands) {
+    $resolution = Get-BenchResolution
+    $width = $resolution[0]; $height = $resolution[1]; $bounds = $resolution[2]
+    if ($width -ne $BenchResX -or $height -ne $BenchResY) {
+        Write-Host "La pantalla principal ($($bounds.Width)x$($bounds.Height)) no admite ${BenchResX}x${BenchResY} en ventana: se mide a ${width}x${height}"
+    }
+    $runs = @()
+    foreach ($run in 1, 2) { $runs += Invoke-BenchRun $run $width $height $ExtraCommands }
+
+    $first = $runs[0].perPortal; $second = $runs[1].perPortal
+    $diffPaired = Get-RelativeDifference $first.gpuMsPaired $second.gpuMsPaired
+    $diffSlope = Get-RelativeDifference $first.gpuMsSlope $second.gpuMsSlope
+    $stable = ($diffPaired -lt $BenchMaxRelativeDiff) -and ($diffSlope -lt $BenchMaxRelativeDiff)
+    $summary = [ordered]@{
+        gpu = $runs[1].gpu
+        requestedResolution = @($BenchResX, $BenchResY)
+        launchedResolution = @($width, $height)
+        measuredViewport = @($runs[0].viewport, $runs[1].viewport)
+        screen = @($bounds.Width, $bounds.Height)
+        gpuMsPerPortalPaired = @($first.gpuMsPaired, $second.gpuMsPaired)
+        gpuMsPerPortalSlope = @($first.gpuMsSlope, $second.gpuMsSlope)
+        relativeDifferencePaired = $diffPaired
+        relativeDifferenceSlope = $diffSlope
+        maxRelativeDifference = $BenchMaxRelativeDiff
+        stable = $stable
+    }
+    $summary | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $ProjectRoot 'Saved\BenchResult.json') -Encoding UTF8
+    $verdict = if ($stable) { 'estable' } else { 'INESTABLE (diferencia >= {0:P0})' -f $BenchMaxRelativeDiff }
+    Write-Host ("Bench: coste por portal {0:N3} / {1:N3} ms (diferencia {2:P1}); pendiente {3:N3} / {4:N3} ms (diferencia {5:P1}): {6}" -f `
+        $first.gpuMsPaired, $second.gpuMsPaired, $diffPaired, $first.gpuMsSlope, $second.gpuMsSlope, $diffSlope, $verdict)
+}
+
+if (-not ($Calibrate -or $SelfTest -or $Tour -or $Bench)) {
+    Write-Output 'Nada que verificar: usa -Calibrate, -SelfTest, -Tour o -Bench.'
     exit 0
 }
 
@@ -160,3 +252,4 @@ if ($SelfTest) {
     Invoke-SelfTest $extraCommands
 }
 if ($Tour) { Invoke-Tour $extraCommands }
+if ($Bench) { Invoke-Bench $extraCommands }

@@ -29,6 +29,13 @@ namespace
 		TEXT("Control negativo de Liminal.SelfTest: escala la velocidad del pawn tras cada paso (1 = sin cambios)."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<float> CVarCaptureScale(
+		TEXT("Liminal.Portal.CaptureScale"),
+		0.f,
+		TEXT("Experimento de coste (E5, D-30): escala del render target de las capturas respecto al viewport ")
+		TEXT("(0 = la de ULiminalPortalsSettings::RenderTargetScale; si no, entre 0,1 y 2)."),
+		ECVF_Default);
+
 	constexpr int32 MaxLagFrames = 4;
 }
 
@@ -168,8 +175,10 @@ void ULiminalPortalSubsystem::CaptureVisiblePortals(APlayerController* PlayerCon
 
 	const ULiminalPortalsSettings* Settings = GetDefault<ULiminalPortalsSettings>();
 	const float RequestedAspect = View.bConstrainAspectRatio ? View.AspectRatio : 0.f;
+	const float ScaleOverride = CVarCaptureScale.GetValueOnGameThread();
+	const float CaptureScale = ScaleOverride > 0.f ? FMath::Clamp(ScaleOverride, 0.1f, 2.f) : Settings->RenderTargetScale;
 	const FIntPoint TargetSize = LiminalPortalMath::ComputeRenderTargetSize(FIntPoint(ViewportX, ViewportY),
-		RequestedAspect, Settings->RenderTargetScale, Settings->MaxRenderTargetDimension);
+		RequestedAspect, CaptureScale, Settings->MaxRenderTargetDimension);
 	if (TargetSize.X <= 0 || TargetSize.Y <= 0)
 	{
 		return;
@@ -218,6 +227,7 @@ void ULiminalPortalSubsystem::CaptureVisiblePortals(APlayerController* PlayerCon
 		if (Portal->CaptureView(CaptureSourceView, TargetSize, HiddenComponents))
 		{
 			++LastCaptureCount;
+			LastCaptureSize = TargetSize;
 		}
 	}
 }

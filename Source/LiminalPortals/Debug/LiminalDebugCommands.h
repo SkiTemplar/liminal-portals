@@ -23,6 +23,13 @@ namespace LiminalDebugCommands
 	 */
 	LIMINALPORTALS_API bool StartSelfTest(UWorld* World, int32 CyclesPerDoor, FString& OutError);
 
+	/**
+	 * Liminal.Bench [Medidos] [Calentamiento]: tiempos de GPU y de CPU por caso en Saved/Bench.json.
+	 * @return false (con el motivo en OutError) si los fotogramas están fuera de rango (medidos >= 120,
+	 *         calentamiento >= 60), no hay mundo de juego o ya hay una medida en curso.
+	 */
+	LIMINALPORTALS_API bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, FString& OutError);
+
 	/** Liminal.Tour: capturas del hub y de cada puerta en Saved/Tour/. */
 	LIMINALPORTALS_API bool StartTour(UWorld* World, FString& OutError);
 

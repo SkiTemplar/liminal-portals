@@ -118,6 +118,7 @@ powershell -File Tools/content.ps1                # materiales y mapas por scrip
 powershell -File Tools/verify.ps1 -Calibrate      # calibración del portal con RHI (fase 1)
 powershell -File Tools/verify.ps1 -SelfTest [-SelfTestNegative]   # cruces hub <-> bioma (fases 2 y 3)
 powershell -File Tools/verify.ps1 -Tour           # capturas del hub y de cada puerta en Saved/Tour/
+powershell -File Tools/verify.ps1 -Bench          # coste por portal a 1920x1080, dos ejecuciones (fase 5)
 ```
 
 ### Calibración del portal (fase 1)
@@ -185,6 +186,40 @@ portal y sin dispersión. Detalle de parámetros en `docs/DECISIONES.md`, D-23 a
 | SelfTest tras E4 | 80 + 80 cruces correctos, 0 fotogramas con la cámara detrás de un portal |
 | Hueco frente al marco en las vistas de puerta (distancia RGB media) | 68-205 (umbral 20) |
 | Pared de vuelta vista desde el bioma (luminancia) | 212-220 (umbral 150, D-24) |
+
+### Medidas (fase 5 parcial)
+
+`Liminal.Bench` coloca la cámara en cinco poses fijas de `L_Hub` (0, 1, 2 y 4 portales visibles y la vista
+del caso de 4 con `Liminal.Portals.Enable 0`), comprueba en cada fotograma medido que el subsistema hace las
+capturas esperadas, calienta 120 fotogramas y mide 240 por caso: tiempo de GPU del fotograma
+(`FRHIGPUFrameTimeHistory`, la serie de `RHIGetGPUFrameCycles`), render thread y game thread. Escribe
+`Saved/Bench.json`; `Tools/verify.ps1 -Bench` lo lanza dos veces y compara el coste por portal (D-29).
+
+Equipo: NVIDIA GeForce RTX 4060 Laptop GPU, D3D12 (SM6), ventana de 1920 × 1080 (pantalla de 2560 × 1440),
+`r.VSync 0`, `t.MaxFPS 0`, TSR, Lumen GI y reflejos. Render target de las capturas: 1920 × 1080; la vista
+principal se renderiza al 73 % y TSR la escala.
+
+| Caso (ejecución 2) | Capturas por fotograma | GPU media / p50 / p95 (ms) | Render thread (ms) | Game thread (ms) |
+|---|---|---|---|---|
+| 0 portales | 0 | 10,84 / 10,57 / 12,23 | 11,29 | 1,44 |
+| 1 portal | 1 | 16,28 / 16,28 / 18,11 | 17,34 | 1,42 |
+| 2 portales | 2 | 24,38 / 24,35 / 26,61 | 25,91 | 1,47 |
+| 4 portales | 4 | 28,61 / 28,63 / 30,93 | 31,44 | 1,53 |
+| Vista de 4 con portales apagados | 0 | 10,89 / 10,60 / 12,44 | 11,54 | 1,34 |
+
+| Coste por portal a 1080p | Ejecución 1 | Ejecución 2 |
+|---|---|---|
+| GPU, (4 portales − apagados) / 4 | 4,37 ms | 4,43 ms (diferencia 1,4 %) |
+| GPU, pendiente sobre 0, 1, 2 y 4 | 4,42 ms | 4,49 ms (diferencia 1,7 %) |
+| Game thread, (4 − apagados) / 4 | 0,06 ms | 0,05 ms |
+
+El coste depende de lo que muestra cada portal: frente a la vista de 0 portales, el caso de 1 sale a 5,2-5,4
+ms y el de 2 (selva y Antártida) a 6,7-6,8 ms por portal, pero esas vistas también cambian lo que se ve del
+hub; el emparejado con los portales apagados es la cifra de referencia. El render thread coincide con el
+tiempo de fotograma porque la GPU es el cuello de botella (incluye la espera). Supera el objetivo provisional
+de 4 ms: con `Liminal.Portal.CaptureScale 0.73` (render target a la resolución interna de la vista principal)
+baja a 3,15-3,22 ms con la calibración en 0,81 % a 1080p, y los reflejos en pantalla no ahorran nada medible;
+ninguna palanca queda activada hasta revisar la imagen (D-30).
 
 Con el editor abierto, la compilación por línea de comandos falla por Live Coding: cerrarlo antes.
 La primera vez, clic derecho en `LiminalPortals.uproject` → *Generate Visual Studio project files*.
