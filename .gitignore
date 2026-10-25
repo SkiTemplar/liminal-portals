@@ -20,3 +20,13 @@ compile_commands.json
 __pycache__/
 *.pyc
 .codegraph/
+
+# Arte: packs descargados y FBX intermedios (docs/ARTE.md)
+Art/Packs/
+Art/Export/
+
+# Python (uv)
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage

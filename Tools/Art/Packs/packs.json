@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "note": "Packs CC0 de terceros que usa Tools/Art/Packs. Nunca se versionan sus ficheros: fetch_packs.py los baja a Art/Packs/ (ignorado) y verifica el sha256. Fuentes y licencias copiadas del manifiesto de Explored (verificadas allí el 2026-09-28) y comprobadas de nuevo con el License.txt de cada zip.",
+  "packs": [
+    {
+      "id": "quaternius_ultimate_nature",
+      "name": "Ultimate Nature Pack",
+      "author": "Quaternius",
+      "page": "https://quaternius.itch.io/150-lowpoly-nature-models",
+      "version": "1.0",
+      "source": {
+        "kind": "itch",
+        "page": "https://quaternius.itch.io/150-lowpoly-nature-models",
+        "uploadId": 1588309
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "verifiedOn": "2026-09-28",
+        "evidence": "Página itch.io: «(CC0 License as always)» y metadato de licencia «Creative Commons Zero v1.0 Universal». License.txt del zip: «CC0 1.0 Universal (CC0 1.0) Public Domain Dedication»."
+      },
+      "formats": ["blend", "fbx", "obj"],
+      "sha256": "865e4ae735116181923fe6ace410da3cec29e814935dc90fb298e0af3a4ff869",
+      "note": "Follaje con colores de material planos (sin textura con alfa): se recolorea por cara."
+    },
+    {
+      "id": "kenney_nature_kit",
+      "name": "Nature Kit",
+      "author": "Kenney",
+      "page": "https://kenney.nl/assets/nature-kit",
+      "version": "2.1",
+      "source": {
+        "kind": "direct",
+        "url": "https://kenney.nl/media/pages/assets/nature-kit/37ac38a37b-1677698939/kenney_nature-kit.zip"
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "verifiedOn": "2026-09-28",
+        "evidence": "Página: «License: Creative Commons CC0». License.txt del zip: «Nature Kit (2.1)» y «License: (Creative Commons Zero, CC0)»."
+      },
+      "formats": ["glb", "fbx", "obj"],
+      "sha256": "fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d",
+      "note": "Cactus, rocas y plantas con colores de material planos."
+    },
+    {
+      "id": "quaternius_stylized_nature_megakit",
+      "name": "Stylized Nature MegaKit (Standard)",
+      "author": "Quaternius",
+      "page": "https://quaternius.itch.io/stylized-nature-megakit",
+      "version": "Standard",
+      "source": {
+        "kind": "itch",
+        "page": "https://quaternius.itch.io/stylized-nature-megakit",
+        "uploadId": 11055123
+      },
+      "license": {
+        "spdx": "CC0-1.0",
+        "verifiedOn": "2026-09-28",
+        "evidence": "Página itch.io: «CC0 License» y metadato de licencia «Creative Commons Zero v1.0 Universal». Upload «Stylized Nature MegaKit[Standard].zip» de precio libre."
+      },
+      "formats": ["gltf", "fbx", "obj"],
+      "sha256": "298f6732b872e4cf7b30e6e7abf9641c7f6dc6b326df37ac089533ed7e3d58c9",
+      "note": "El follaje usa texturas con alfa y no se recolorea por cara: de este pack solo se usan rocas."
+    }
+  ]
+}

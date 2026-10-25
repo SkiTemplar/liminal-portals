@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "note": "Paletas sRGB por bioma copiadas de docs/ARTE.md (si cambian allí, se cambian aquí). Las reglas recolor de catalog.json apuntan a estos nombres.",
+  "biomes": {
+    "Jungle": {
+      "verde_1": "#1F4D2B",
+      "verde_2": "#2E6B36",
+      "verde_3": "#4E8F3A",
+      "verde_4": "#8DBF4A",
+      "tronco": "#5A3E2B",
+      "camino": "#7A6A45",
+      "flor_roja": "#E05A47",
+      "flor_amarilla": "#F2B33D"
+    },
+    "Desert": {
+      "arena_1": "#E8C48A",
+      "arena_2": "#D9A866",
+      "arena_3": "#C48A4E",
+      "roca_1": "#A0583A",
+      "roca_2": "#7E4630",
+      "roca_3": "#5E3626",
+      "cactus": "#6F8F4E",
+      "matorral": "#9C8A5A"
+    },
+    "Antarctic": {
+      "nieve_1": "#F4F7FA",
+      "nieve_2": "#DDE7EF",
+      "hielo_1": "#A9D6EA",
+      "hielo_2": "#6FB3D6",
+      "hielo_3": "#3C83B0",
+      "roca_1": "#3A3F47",
+      "roca_2": "#55606B"
+    },
+    "Farmland": {
+      "trigo_1": "#E3C565",
+      "trigo_2": "#C9A54A",
+      "verde_1": "#8DB45A",
+      "verde_2": "#5E8C3A",
+      "tierra_1": "#7A5434",
+      "tierra_2": "#5C3E26",
+      "madera": "#A47B4E",
+      "granero": "#A63D2F",
+      "heno": "#D8B65A"
+    }
+  }
+}
