@@ -51,6 +51,11 @@ namespace LiminalWorldLayout
 		double WallThickness = 20.0;
 		/** Grosor del suelo y del techo. */
 		double SlabThickness = 10.0;
+		/**
+		 * Cámara entre el techo de placas (a la altura de la sala) y la losa: las placas y los paneles
+		 * fluorescentes miden hasta 9 cm hacia arriba. Las paredes suben hasta la losa.
+		 */
+		double CeilingPlenum = 10.0;
 		FVector2D DoorSize = FVector2D(140.0, 230.0);
 		double DoorFrameThickness = 12.0;
 		TArray<FHubDoorSpec> Doors;

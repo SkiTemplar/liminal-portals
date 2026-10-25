@@ -105,7 +105,7 @@ namespace LiminalWorldLayout
 
 		const FVector& Size = Layout.InteriorSize;
 		if (Size.X <= Epsilon || Size.Y <= Epsilon || Size.Z <= Epsilon || Layout.WallThickness <= Epsilon
-			|| Layout.SlabThickness <= Epsilon)
+			|| Layout.SlabThickness <= Epsilon || Layout.CeilingPlenum < 0.0)
 		{
 			return Fail(TEXT("medidas de la sala no positivas"));
 		}
@@ -164,26 +164,28 @@ namespace LiminalWorldLayout
 		const double HalfWidth = Layout.InteriorSize.Y * 0.5;
 		const double Height = Layout.InteriorSize.Z;
 		const double Wall = Layout.WallThickness;
+		// Las paredes cierran también la cámara del techo de placas.
+		const double WallHeight = Height + FMath::Max(Layout.CeilingPlenum, 0.0);
 
 		// Paredes largas: llegan hasta el exterior de las de los extremos para cerrar las esquinas.
 		for (const bool bPositive : { true, false })
 		{
 			TArray<FBox2D> Segments;
-			SplitWallAroundOpenings(-HalfLength - Wall, HalfLength + Wall, Height, CollectOpenings(Layout, bPositive), Segments);
+			SplitWallAroundOpenings(-HalfLength - Wall, HalfLength + Wall, WallHeight, CollectOpenings(Layout, bPositive), Segments);
 			const double MinY = bPositive ? HalfWidth : -HalfWidth - Wall;
 			for (const FBox2D& Segment : Segments)
 			{
 				Geometry.Walls.Add(WallBoxAlongX(Segment, MinY, MinY + Wall));
 			}
 		}
-		const FBox2D EndWall(FVector2D(-HalfWidth, 0.0), FVector2D(HalfWidth, Height));
+		const FBox2D EndWall(FVector2D(-HalfWidth, 0.0), FVector2D(HalfWidth, WallHeight));
 		Geometry.Walls.Add(WallBoxAlongY(EndWall, HalfLength, HalfLength + Wall));
 		Geometry.Walls.Add(WallBoxAlongY(EndWall, -HalfLength - Wall, -HalfLength));
 
 		const FVector OuterMin(-HalfLength - Wall, -HalfWidth - Wall, 0.0);
 		const FVector OuterMax(HalfLength + Wall, HalfWidth + Wall, 0.0);
 		Geometry.Floor = FBox(OuterMin - FVector(0.0, 0.0, Layout.SlabThickness), OuterMax);
-		Geometry.Ceiling = FBox(OuterMin + FVector(0.0, 0.0, Height), OuterMax + FVector(0.0, 0.0, Height + Layout.SlabThickness));
+		Geometry.Ceiling = FBox(OuterMin + FVector(0.0, 0.0, WallHeight), OuterMax + FVector(0.0, 0.0, WallHeight + Layout.SlabThickness));
 
 		const FVector PanelHalf(Layout.LightPanelSize.X * 0.5, Layout.LightPanelSize.Y * 0.5, 0.0);
 		for (int32 Index = 0; Index < Layout.NumCeilingLights; ++Index)

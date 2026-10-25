@@ -12,6 +12,10 @@ namespace LiminalTerrainMathDetail
 	constexpr int32 SaltFurrow = 0x6E1A4B83;
 	constexpr int32 SaltCrop = 0x7F4C2D95;
 	constexpr int32 SaltDune = 0x0E5EED11;
+	constexpr int32 SaltFace = 0x13579BDF;
+
+	/** Variación de brillo por cara (facetado): ±FaceJitter. */
+	constexpr double FaceJitter = 0.04;
 
 	/** Semiancho del camino de tierra pintado sobre la zona llana, en cm. */
 	constexpr double PathHalfWidth = 250.0;
@@ -81,8 +85,7 @@ namespace LiminalTerrainMathDetail
 		const LiminalTerrainMath::FFarmGrid& Farm = Params.Farm;
 		const double Base = 70.0 * LiminalTerrainMath::Fbm(X / 25000.0, Y / 25000.0, Params.Seed, 3);
 		const LiminalTerrainMath::FFarmCell Cell = LiminalTerrainMath::GetFarmCell(Farm, FVector2D(X, Y));
-		const bool bAlongX = LiminalTerrainMath::Hash01(Cell.IX, Cell.IY, Params.Seed ^ SaltFurrow) < 0.5;
-		const double Coordinate = bAlongX ? Y : X;
+		const double Coordinate = LiminalTerrainMath::IsParcelAlongX(Cell.IX, Cell.IY, Params.Seed) ? Y : X;
 		const double Furrow = Farm.FurrowAmplitude * FMath::Sin(UE_DOUBLE_TWO_PI * Coordinate / Farm.FurrowPeriod);
 		const double FurrowFade = LiminalTerrainMath::SmoothStep01(Cell.DistanceToRoad / 150.0);
 		const double Roadness = 1.0 - LiminalTerrainMath::SmoothStep01((Cell.DistanceToRoad + 50.0) / 100.0);
@@ -91,11 +94,12 @@ namespace LiminalTerrainMathDetail
 
 	FLinearColor FarmlandColor(const LiminalTerrainMath::FTerrainParams& Params, double X, double Y)
 	{
+		// Paleta de docs/ARTE.md en lineal: trigo #C9A54A, cultivo verde #5E8C3A, tierra #7A5434 y #8DB45A.
 		static const FLinearColor Crops[4] = {
-			FLinearColor(0.50f, 0.36f, 0.08f),  // trigo
-			FLinearColor(0.10f, 0.25f, 0.04f),  // verde
-			FLinearColor(0.13f, 0.07f, 0.035f), // arado
-			FLinearColor(0.25f, 0.38f, 0.08f),  // verde claro
+			FLinearColor(0.584f, 0.376f, 0.070f), // trigo
+			FLinearColor(0.111f, 0.262f, 0.042f), // verde (maíz)
+			FLinearColor(0.195f, 0.089f, 0.034f), // arado
+			FLinearColor(0.266f, 0.456f, 0.102f), // verde claro (filas)
 		};
 		const FLinearColor Road(0.24f, 0.16f, 0.08f);
 		const LiminalTerrainMath::FFarmGrid& Farm = Params.Farm;
@@ -104,8 +108,7 @@ namespace LiminalTerrainMathDetail
 		{
 			return Road;
 		}
-		const bool bAlongX = LiminalTerrainMath::Hash01(Cell.IX, Cell.IY, Params.Seed ^ SaltFurrow) < 0.5;
-		const double Coordinate = bAlongX ? Y : X;
+		const double Coordinate = LiminalTerrainMath::IsParcelAlongX(Cell.IX, Cell.IY, Params.Seed) ? Y : X;
 		const double Stripe = 0.88 + 0.12 * (0.5 + 0.5 * FMath::Sin(UE_DOUBLE_TWO_PI * Coordinate / Farm.FurrowPeriod));
 		const FLinearColor Crop = Crops[LiminalTerrainMath::GetParcelCrop(Cell.IX, Cell.IY, Params.Seed)] * static_cast<float>(Stripe);
 		return Mix(Road, Crop, Cell.DistanceToRoad / 60.0);
@@ -249,6 +252,11 @@ namespace LiminalTerrainMath
 		return Group + (Hash01(IX, IY, Seed ^ LiminalTerrainMathDetail::SaltCrop) < 0.5 ? 0 : 1);
 	}
 
+	bool IsParcelAlongX(int32 IX, int32 IY, int32 Seed)
+	{
+		return Hash01(IX, IY, Seed ^ LiminalTerrainMathDetail::SaltFurrow) < 0.5;
+	}
+
 	double SampleRawHeight(const FTerrainParams& Params, double X, double Y)
 	{
 		switch (Params.Type)
@@ -285,13 +293,22 @@ namespace LiminalTerrainMath
 		}
 		case ELiminalBiomeType::Desert:
 		{
-			const FLinearColor Sand = LiminalTerrainMathDetail::Mix(FLinearColor(0.45f, 0.30f, 0.15f), FLinearColor(0.70f, 0.52f, 0.30f), Height / 800.0);
+			// Arena de docs/ARTE.md en lineal: #C48A4E en las hondonadas, #D9A866 a media altura y #E8C48A en las crestas.
+			const double T = FMath::Clamp(Height / 700.0, 0.0, 1.0);
+			const FLinearColor Low(0.552f, 0.254f, 0.076f);
+			const FLinearColor Mid(0.693f, 0.392f, 0.135f);
+			const FLinearColor High(0.807f, 0.552f, 0.254f);
+			const FLinearColor Sand = T < 0.5 ? LiminalTerrainMathDetail::Mix(Low, Mid, T * 2.0) : LiminalTerrainMathDetail::Mix(Mid, High, T * 2.0 - 1.0);
 			return Sand * static_cast<float>(0.94 + 0.06 * Variation);
 		}
 		case ELiminalBiomeType::Antarctic:
 		{
-			const double Ice = SmoothStep01((Fbm(X / 5000.0, Y / 5000.0, Params.Seed ^ LiminalTerrainMathDetail::SaltColor, 3) - 0.3) / 0.2);
-			const FLinearColor Snow = LiminalTerrainMathDetail::Mix(FLinearColor(0.80f, 0.85f, 0.90f), FLinearColor(0.42f, 0.60f, 0.75f), Ice);
+			// Nieve #F4F7FA y #DDE7EF alternando por ruido y placas de hielo #A9D6EA (lineal, docs/ARTE.md).
+			const double Ice = SmoothStep01((Fbm(X / 5000.0, Y / 5000.0, Params.Seed ^ LiminalTerrainMathDetail::SaltColor, 3) - 0.15) / 0.2);
+			// Con el sol compartido la nieve más clara se satura: domina #DDE7EF y el hielo llega a #6FB3D6 en el centro de las placas.
+			const FLinearColor Drift = LiminalTerrainMathDetail::Mix(FLinearColor(0.723f, 0.799f, 0.863f), FLinearColor(0.905f, 0.930f, 0.955f), Variation * Variation);
+			const FLinearColor Plate = LiminalTerrainMathDetail::Mix(FLinearColor(0.397f, 0.672f, 0.823f), FLinearColor(0.159f, 0.451f, 0.672f), Ice * Ice);
+			const FLinearColor Snow = LiminalTerrainMathDetail::Mix(Drift, Plate, Ice);
 			return LiminalTerrainMathDetail::Mix(Snow, FLinearColor(0.62f, 0.66f, 0.71f), LiminalTerrainMathDetail::PathMix(Params.FlatZone, Point));
 		}
 		case ELiminalBiomeType::Farmland:
@@ -330,6 +347,35 @@ namespace LiminalTerrainMath
 		return Heights;
 	}
 
+	double SampleSurfaceHeight(const FTerrainParams& Params, const FTerrainGrid& Grid, double X, double Y)
+	{
+		if (Grid.NumX < 2 || Grid.NumY < 2 || Grid.Spacing <= 0.0)
+		{
+			return SampleHeight(Params, X, Y);
+		}
+		const double U = FMath::Clamp((X - Grid.Origin.X) / Grid.Spacing, 0.0, static_cast<double>(Grid.NumX - 1));
+		const double V = FMath::Clamp((Y - Grid.Origin.Y) / Grid.Spacing, 0.0, static_cast<double>(Grid.NumY - 1));
+		const int32 IX = FMath::Min(FMath::FloorToInt32(U), Grid.NumX - 2);
+		const int32 IY = FMath::Min(FMath::FloorToInt32(V), Grid.NumY - 2);
+		const double FX = U - IX;
+		const double FY = V - IY;
+		auto CornerHeight = [&Params, &Grid](int32 CX, int32 CY)
+		{
+			const FVector2D Point = Grid.GetPoint(CX, CY);
+			return SampleHeight(Params, Point.X, Point.Y);
+		};
+		const double H0 = CornerHeight(IX, IY);
+		const double H2 = CornerHeight(IX + 1, IY + 1);
+		// Triángulos de BuildTerrainMesh: (I0, I3, I2) con FY >= FX e (I0, I2, I1) con FX >= FY.
+		if (FX >= FY)
+		{
+			const double H1 = CornerHeight(IX + 1, IY);
+			return H0 + FX * (H1 - H0) + FY * (H2 - H1);
+		}
+		const double H3 = CornerHeight(IX, IY + 1);
+		return H0 + FY * (H3 - H0) + FX * (H2 - H3);
+	}
+
 	bool BuildTerrainMesh(const FTerrainParams& Params, const FTerrainGrid& Grid, FTerrainMesh& OutMesh)
 	{
 		OutMesh = FTerrainMesh();
@@ -338,49 +384,49 @@ namespace LiminalTerrainMath
 			return false;
 		}
 		const TArray<double> Heights = SampleHeightField(Params, Grid);
-		auto HeightAt = [&Heights, &Grid](int32 IX, int32 IY)
+		auto Corner = [&Heights, &Grid](int32 IX, int32 IY)
 		{
-			return Heights[FMath::Clamp(IX, 0, Grid.NumX - 1) * Grid.NumY + FMath::Clamp(IY, 0, Grid.NumY - 1)];
+			const FVector2D Point = Grid.GetPoint(IX, IY);
+			return FVector(Point.X, Point.Y, Heights[IX * Grid.NumY + IY]);
 		};
 
-		const int32 NumVertices = Grid.Num();
-		OutMesh.Vertices.Reserve(NumVertices);
-		OutMesh.Normals.Reserve(NumVertices);
-		OutMesh.Tangents.Reserve(NumVertices);
-		OutMesh.UVs.Reserve(NumVertices);
-		OutMesh.Colors.Reserve(NumVertices);
-		for (int32 IX = 0; IX < Grid.NumX; ++IX)
-		{
-			for (int32 IY = 0; IY < Grid.NumY; ++IY)
-			{
-				const FVector2D Point = Grid.GetPoint(IX, IY);
-				const double Height = HeightAt(IX, IY);
-				// Diferencias centrales (laterales en el borde): gradiente del campo de alturas.
-				const int32 X0 = FMath::Max(IX - 1, 0);
-				const int32 X1 = FMath::Min(IX + 1, Grid.NumX - 1);
-				const int32 Y0 = FMath::Max(IY - 1, 0);
-				const int32 Y1 = FMath::Min(IY + 1, Grid.NumY - 1);
-				const double DX = (HeightAt(X1, IY) - HeightAt(X0, IY)) / ((X1 - X0) * Grid.Spacing);
-				const double DY = (HeightAt(IX, Y1) - HeightAt(IX, Y0)) / ((Y1 - Y0) * Grid.Spacing);
-				OutMesh.Vertices.Add(FVector(Point.X, Point.Y, Height));
-				OutMesh.Normals.Add(FVector(-DX, -DY, 1.0).GetSafeNormal());
-				OutMesh.Tangents.Add(FVector(1.0, 0.0, DX).GetSafeNormal());
-				OutMesh.UVs.Add(Point / 1000.0);
-				OutMesh.Colors.Add(SampleColor(Params, Point.X, Point.Y, Height));
-			}
-		}
+		const int32 NumCorners = (Grid.NumX - 1) * (Grid.NumY - 1) * 6;
+		OutMesh.Vertices.Reserve(NumCorners);
+		OutMesh.Normals.Reserve(NumCorners);
+		OutMesh.Tangents.Reserve(NumCorners);
+		OutMesh.UVs.Reserve(NumCorners);
+		OutMesh.Colors.Reserve(NumCorners);
+		OutMesh.Triangles.Reserve(NumCorners);
 
-		OutMesh.Triangles.Reserve((Grid.NumX - 1) * (Grid.NumY - 1) * 6);
+		auto AddFace = [&OutMesh, &Params](const FVector& P0, const FVector& P1, const FVector& P2, uint32 FaceHash)
+		{
+			// (P1 − P2) × (P0 − P2) apunta a +Z con este orden (convención de UE para la cara frontal).
+			const FVector Normal = FVector::CrossProduct(P1 - P2, P0 - P2).GetSafeNormal();
+			const FVector Tangent = FVector::VectorPlaneProject(FVector::XAxisVector, Normal).GetSafeNormal();
+			const FVector Center = (P0 + P1 + P2) / 3.0;
+			const double Jitter = 1.0 + LiminalTerrainMathDetail::FaceJitter * (2.0 * (static_cast<double>(FaceHash) / 4294967296.0) - 1.0);
+			const FLinearColor Color = SampleColor(Params, Center.X, Center.Y, Center.Z) * static_cast<float>(Jitter);
+			for (const FVector& P : { P0, P1, P2 })
+			{
+				OutMesh.Triangles.Add(OutMesh.Vertices.Num());
+				OutMesh.Vertices.Add(P);
+				OutMesh.Normals.Add(Normal);
+				OutMesh.Tangents.Add(Tangent);
+				OutMesh.UVs.Add(FVector2D(P.X, P.Y) / 1000.0);
+				OutMesh.Colors.Add(Color);
+			}
+		};
+
 		for (int32 IX = 0; IX + 1 < Grid.NumX; ++IX)
 		{
 			for (int32 IY = 0; IY + 1 < Grid.NumY; ++IY)
 			{
-				const int32 I0 = IX * Grid.NumY + IY;
-				const int32 I1 = (IX + 1) * Grid.NumY + IY;
-				const int32 I2 = (IX + 1) * Grid.NumY + IY + 1;
-				const int32 I3 = IX * Grid.NumY + IY + 1;
-				// (P1 − P2) × (P0 − P2) apunta a +Z con este orden (convención de UE para la cara frontal).
-				OutMesh.Triangles.Append({ I0, I3, I2, I0, I2, I1 });
+				const FVector P0 = Corner(IX, IY);
+				const FVector P1 = Corner(IX + 1, IY);
+				const FVector P2 = Corner(IX + 1, IY + 1);
+				const FVector P3 = Corner(IX, IY + 1);
+				AddFace(P0, P3, P2, HashInts(IX * 2, IY, Params.Seed ^ LiminalTerrainMathDetail::SaltFace));
+				AddFace(P0, P2, P1, HashInts(IX * 2 + 1, IY, Params.Seed ^ LiminalTerrainMathDetail::SaltFace));
 			}
 		}
 		return true;

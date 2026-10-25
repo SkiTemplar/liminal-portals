@@ -7,13 +7,24 @@
 #include "LiminalPortals.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/LiminalArtCatalog.h"
 #include "World/LiminalBlockout.h"
+#include "World/LiminalHubDressing.h"
 
-namespace
+// Namespace con nombre propio (D-22): el unity build junta todos los .cpp del módulo.
+namespace LiminalHubDetail
 {
 	/** La RectLight queda un poco por debajo del panel para que este no la tape. */
 	constexpr double LightBelowPanel = 1.0;
 	constexpr float LightAttenuationRadius = 1500.f;
+
+	/** Las piezas planas del suelo y del techo y el difusor emisivo no proyectan sombra. */
+	bool CastsShadow(LiminalArtCatalog::EHubPiece Piece)
+	{
+		using LiminalArtCatalog::EHubPiece;
+		return Piece != EHubPiece::Carpet && Piece != EHubPiece::CarpetBorder && Piece != EHubPiece::CeilingTile
+			&& Piece != EHubPiece::CeilingTileStained && Piece != EHubPiece::LightPanel;
+	}
 }
 
 ALiminalHub::ALiminalHub()
@@ -28,13 +39,19 @@ ALiminalHub::ALiminalHub()
 	SetRootComponent(Root);
 
 	Walls = LiminalBlockout::CreateBoxes(this, TEXT("Walls"), Root, CubeMesh);
-	Carpet = LiminalBlockout::CreateBoxes(this, TEXT("Carpet"), Root, CubeMesh);
-	Ceiling = LiminalBlockout::CreateBoxes(this, TEXT("Ceiling"), Root, CubeMesh);
+	Floor = LiminalBlockout::CreateBoxes(this, TEXT("Floor"), Root, CubeMesh);
+	CeilingSlab = LiminalBlockout::CreateBoxes(this, TEXT("CeilingSlab"), Root, CubeMesh);
 
-	// Los paneles son emisivos: sin sombra ni colisión, para no tapar su propia RectLight.
-	LightPanels = LiminalBlockout::CreateBoxes(this, TEXT("LightPanels"), Root, CubeMesh);
-	LightPanels->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
-	LightPanels->SetCastShadow(false);
+	// Atrezo: sin colisión ni navegación; las mallas se asignan en Rebuild (se cargan de /Game/Art).
+	for (int32 Index = 0; Index < LiminalArtCatalog::NumHubPieces; ++Index)
+	{
+		const LiminalArtCatalog::EHubPiece Piece = static_cast<LiminalArtCatalog::EHubPiece>(Index);
+		UInstancedStaticMeshComponent* Component = LiminalBlockout::CreateBoxes(this,
+			*FString::Printf(TEXT("Dressing_%s"), LiminalArtCatalog::GetHubPieceName(Piece)), Root, nullptr);
+		Component->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+		Component->SetCastShadow(LiminalHubDetail::CastsShadow(Piece));
+		Dressing.Add(Component);
+	}
 
 	for (int32 Index = 0; Index < NumCeilingLights; ++Index)
 	{
@@ -44,7 +61,7 @@ ALiminalHub::ALiminalHub()
 		// Apunta hacia abajo: el eje X de la luz es la dirección de emisión.
 		Light->SetRelativeRotation(FRotator(-90.0, 0.0, 0.0));
 		Light->SetIntensityUnits(ELightUnits::Nits);
-		Light->SetAttenuationRadius(LightAttenuationRadius);
+		Light->SetAttenuationRadius(LiminalHubDetail::LightAttenuationRadius);
 		Light->SetCastShadows(true);
 		CeilingLights.Add(Light);
 	}
@@ -98,7 +115,11 @@ void ALiminalHub::Rebuild()
 	if (!LiminalWorldLayout::IsValidHubLayout(Layout, &Error) || !LiminalWorldLayout::BuildHubGeometry(Layout, Geometry))
 	{
 		UE_LOG(LogLiminalPortals, Error, TEXT("%s: layout del hub no válido (%s); no se genera geometría."), *GetName(), *Error);
-		for (UInstancedStaticMeshComponent* Component : { Walls.Get(), Carpet.Get(), Ceiling.Get(), LightPanels.Get() })
+		for (UInstancedStaticMeshComponent* Component : { Walls.Get(), Floor.Get(), CeilingSlab.Get() })
+		{
+			Component->ClearInstances();
+		}
+		for (UInstancedStaticMeshComponent* Component : Dressing)
 		{
 			Component->ClearInstances();
 		}
@@ -110,9 +131,9 @@ void ALiminalHub::Rebuild()
 	}
 
 	LiminalBlockout::SetBoxes(Walls, Geometry.Walls, WallMaterial);
-	LiminalBlockout::SetBoxes(Carpet, MakeArrayView(&Geometry.Floor, 1), CarpetMaterial);
-	LiminalBlockout::SetBoxes(Ceiling, MakeArrayView(&Geometry.Ceiling, 1), CeilingMaterial);
-	LiminalBlockout::SetBoxes(LightPanels, Geometry.LightPanels, LightPanelMaterial);
+	LiminalBlockout::SetBoxes(Floor, MakeArrayView(&Geometry.Floor, 1), CarpetMaterial);
+	LiminalBlockout::SetBoxes(CeilingSlab, MakeArrayView(&Geometry.Ceiling, 1), CeilingMaterial);
+	RebuildDressing(Layout);
 
 	for (int32 Index = 0; Index < CeilingLights.Num(); ++Index)
 	{
@@ -123,12 +144,31 @@ void ALiminalHub::Rebuild()
 		{
 			continue;
 		}
-		Light->SetRelativeLocation(Geometry.LightLocations[Index] - FVector(0.0, 0.0, LightBelowPanel));
+		Light->SetRelativeLocation(Geometry.LightLocations[Index] - FVector(0.0, 0.0, LiminalHubDetail::LightBelowPanel));
 		// Con la luz mirando a −Z, el ancho de la fuente va en Y local (X del panel) y el alto en Z (Y del panel).
 		const FBox& Panel = Geometry.LightPanels[Index];
 		Light->SetSourceWidth(Panel.GetSize().Y);
 		Light->SetSourceHeight(Panel.GetSize().X);
 		Light->SetIntensity(LightNits);
 		Light->SetLightColor(LightColor);
+	}
+}
+
+void ALiminalHub::RebuildDressing(const LiminalWorldLayout::FHubLayout& Layout)
+{
+	LiminalHubDressing::FHubDressing Pieces;
+	LiminalHubDressing::BuildHubDressing(Layout, Pieces);
+	for (int32 Index = 0; Index < Dressing.Num(); ++Index)
+	{
+		UInstancedStaticMeshComponent* Component = Dressing[Index];
+		Component->ClearInstances();
+		const LiminalArtCatalog::EHubPiece Piece = static_cast<LiminalArtCatalog::EHubPiece>(Index);
+		UStaticMesh* Mesh = LiminalBlockout::LoadArtMesh(LiminalArtCatalog::GetHubPieceName(Piece), this);
+		if (!Mesh)
+		{
+			continue;
+		}
+		Component->SetStaticMesh(Mesh);
+		Component->AddInstances(Pieces.Get(Piece), false, false, false);
 	}
 }

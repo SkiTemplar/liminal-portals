@@ -232,6 +232,12 @@ void ALiminalPortal::ApplyLayout()
 	PlaceBox(FrameLeft, FVector(JambCenterX, -JambY, (Height + Frame) * 0.5), JambSize);
 	PlaceBox(FrameRight, FVector(JambCenterX, JambY, (Height + Frame) * 0.5), JambSize);
 	PlaceBox(FrameTop, FVector(JambCenterX, 0.0, Height + Frame * 0.5), FVector(JambDepth, Width + 2.0 * Frame, Frame));
+	for (UStaticMeshComponent* Box : { FrameLeft.Get(), FrameRight.Get(), FrameTop.Get() })
+	{
+		Box->SetVisibility(bShowFrame);
+		// Oculto, sigue proyectando sombra: si no, el sol entra por los lados del túnel (entre la pared y la placa).
+		Box->SetCastHiddenShadow(true);
+	}
 
 	PlaceBox(BackPlate, FVector(-(BackPlateDistance + BackPlateThickness * 0.5), 0.0, (Height + Frame) * 0.5),
 		FVector(BackPlateThickness, Width + 2.0 * Frame, Height + Frame));

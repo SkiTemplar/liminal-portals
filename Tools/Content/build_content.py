@@ -13,10 +13,13 @@
   parejas (puerta del hub <-> puerta de vuelta), el mismo sol, cielo, SkyLight y post-process global
   que la calibración, y el PlayerStart dentro del hub. Materiales MI_Hub_* y MI_Biome_*.
 - Etapa E4: /Game/Biomes/Materials/M_Terrain (color por vértice del terreno procedural, guardado en
-  sRGB, por un parámetro Color) con MI_Biome_<Tipo> como hijos, y MI_Scatter_<Categoría> (hijos de
-  M_Basic) con los colores de ALiminalBiome::GetScatterColor. El sol de L_Hub llega por delante y de
+  sRGB, por un parámetro Color) con MI_Biome_<Tipo> como hijos. El sol de L_Hub llega por delante y de
   lado a las puertas de vuelta (HUB_SUN_ROTATION) y su SkyLight va al doble (HUB_SKY_INTENSITY, D-28);
   el sol y el cielo de L_Calibration no cambian.
+- Arte low-poly: el hub, la dispersión y las paredes de vuelta usan las mallas de /Game/Art (las importa
+  Tools/Content/import_art.py, que va antes en Tools/content.ps1); aquí solo se comprueba que existen. Los
+  portales de L_Hub no dibujan su marco de cajas (show_frame = False): lo dibujan SM_Hub_DoorFrame_01 y
+  SM_ReturnWall_* (D-32). Borra los MI_Scatter_* y MI_Hub_LightPanel de las formas básicas.
 
 Uso: powershell -File Tools/content.ps1 (lanza UnrealEditor-Cmd -run=pythonscript con este script).
 Escribe Saved/Content/build_content.json con el resultado; content.ps1 lo comprueba.
@@ -266,14 +269,16 @@ def build_calibration_map(mats):
     return count
 
 
-# L_Hub (E3). Colores lineales: paredes claras amarillentas, moqueta mostaza y techo de placas.
+# L_Hub. Colores lineales de la paleta del hub (docs/ARTE.md): pared #E8DDB5; las losas del suelo y del
+# techo quedan bajo la moqueta y sobre las placas (moqueta oscura #8F7A42 y techo #F2EEDD).
 HUB_COLORS = {
-    "Wall": ((0.72, 0.66, 0.48), 0.85),
-    "Carpet": ((0.30, 0.25, 0.12), 0.95),
-    "Ceiling": ((0.76, 0.75, 0.70), 0.9),
+    "Wall": ((0.807, 0.723, 0.462), 0.85),
+    "Carpet": ((0.274, 0.195, 0.054), 0.95),
+    "Ceiling": ((0.888, 0.855, 0.723), 0.9),
 }
-LIGHT_PANEL_COLOR = (0.9, 0.9, 0.85)
-LIGHT_PANEL_EMISSIVE = (6.0, 5.8, 5.2)
+# Assets de las formas básicas que ya no se usan (sustituidos por el arte de /Game/Art).
+OBSOLETE_FOLDER_PREFIXES = ("/Game/Biomes/Materials/MI_Scatter_",)
+OBSOLETE_ASSETS = ("/Game/Hub/Materials/MI_Hub_LightPanel",)
 # Separación de los biomas (decisión 11): k × 20 km en X; igual que LiminalWorldLayout::BiomeSpacing.
 BIOME_SPACING = 2000000.0
 BIOMES = [("JUNGLE", 1001), ("DESERT", 1002), ("ANTARCTIC", 1003), ("FARMLAND", 1004)]
@@ -289,10 +294,36 @@ def build_hub_instances(basic):
     for name, (color, roughness) in HUB_COLORS.items():
         instances[name] = cu.ensure_material_instance(f"{HUB_MI_FOLDER}/MI_Hub_{name}", basic,
                                                       {"Color": color}, {"Roughness": roughness})
-    instances["LightPanel"] = cu.ensure_material_instance(f"{HUB_MI_FOLDER}/MI_Hub_LightPanel", basic,
-                                                          {"Color": LIGHT_PANEL_COLOR, "Emissive": LIGHT_PANEL_EMISSIVE},
-                                                          {"Roughness": 0.5})
     return instances
+
+
+def delete_obsolete_assets():
+    """Borra los materiales de las formas básicas que ya no usa nadie; devuelve las rutas borradas."""
+    deleted = []
+    candidates = list(OBSOLETE_ASSETS)
+    for prefix in OBSOLETE_FOLDER_PREFIXES:
+        folder = prefix.rsplit("/", 1)[0]
+        for path in cu.EAL.list_assets(folder, recursive=False):
+            package = path.split(".")[0]
+            if package.startswith(prefix):
+                candidates.append(package)
+    for path in candidates:
+        if cu.EAL.does_asset_exist(path):
+            cu.require(cu.EAL.delete_asset(path), f"No se pudo borrar {path}")
+            deleted.append(path)
+    return deleted
+
+
+def check_art_meshes():
+    """Las mallas del catálogo C++ (LiminalArtCatalog) tienen que estar importadas en /Game/Art."""
+    names = list(unreal.LiminalBiome.get_art_mesh_names())
+    missing = []
+    for name in names:
+        kit = name.split("_")[1]
+        if not cu.EAL.does_asset_exist(f"/Game/Art/{kit}/{name}"):
+            missing.append(name)
+    cu.require(not missing, f"Faltan mallas de arte (Tools/content.ps1 -Mode Art): {missing}")
+    return len(names)
 
 
 def build_terrain_material():
@@ -328,17 +359,6 @@ def build_biome_instances(terrain):
     return instances
 
 
-def build_scatter_instances(basic):
-    """MI_Scatter_<Categoría> con el color y la rugosidad de ALiminalBiome::GetScatterColor (fuente única en C++)."""
-    instances = {}
-    for category in unreal.LiminalBiome.get_all_scatter_categories():
-        name = unreal.LiminalBiome.get_scatter_category_name(category)
-        color, roughness = unreal.LiminalBiome.get_scatter_color(category)
-        instances[category] = cu.ensure_material_instance(f"{BIOME_MI_FOLDER}/MI_Scatter_{name}", basic,
-                                                          {"Color": (color.r, color.g, color.b)}, {"Roughness": roughness})
-    return instances
-
-
 def check_generated(actor, label, material):
     """El OnConstruction del actor debe haber generado cajas con el material asignado."""
     components = actor.get_components_by_class(unreal.InstancedStaticMeshComponent)
@@ -354,9 +374,11 @@ def place_hub(actors, hub_mats):
     hub.set_editor_property("wall_material", hub_mats["Wall"])
     hub.set_editor_property("carpet_material", hub_mats["Carpet"])
     hub.set_editor_property("ceiling_material", hub_mats["Ceiling"])
-    hub.set_editor_property("light_panel_material", hub_mats["LightPanel"])
     check_generated(hub, "Hub", hub_mats["Wall"])
     cu.require(hub.get_num_doors() == len(BIOMES), f"El hub tiene {hub.get_num_doors()} puertas y hay {len(BIOMES)} biomas")
+    dressing = [c for c in hub.get_components_by_class(unreal.InstancedStaticMeshComponent)
+                if c.get_name().startswith("Dressing_") and c.get_instance_count() > 0]
+    cu.require(len(dressing) >= 12, f"El hub solo tiene {len(dressing)} piezas de atrezo con instancias")
     return hub
 
 
@@ -368,10 +390,17 @@ def check_biome_content(biome, label):
     vertices = biome.get_editor_property("terrain_vertex_count")
     cu.require(0 < instances <= MAX_SCATTER_INSTANCES, f"{label}: {instances} instancias (presupuesto {MAX_SCATTER_INSTANCES})")
     cu.require(vertices > 0, f"{label} sin vértices de terreno")
-    return {"instances": instances, "terrainVertices": vertices}
+    wall = [c for c in biome.get_components_by_class(unreal.StaticMeshComponent)
+            if c.get_name() == "ReturnWallMesh" and c.get_editor_property("static_mesh")]
+    cu.require(wall, f"{label} sin pared de vuelta low-poly")
+    return {"instances": instances, "triangles": biome.get_editor_property("scatter_triangle_count"),
+            "nearInstances": biome.get_editor_property("near_instance_count"),
+            "nearTriangles": biome.get_editor_property("near_triangle_count"),
+            "components": len(biome.get_components_by_class(unreal.HierarchicalInstancedStaticMeshComponent)),
+            "terrainVertices": vertices}
 
 
-def place_biomes(actors, biome_mats, scatter_mats, wall_material, hub):
+def place_biomes(actors, biome_mats, wall_material, hub):
     biomes = []
     stats = {}
     door_size = hub.get_editor_property("door_size")
@@ -390,7 +419,6 @@ def place_biomes(actors, biome_mats, scatter_mats, wall_material, hub):
         biome.set_editor_property("door_frame_thickness", frame)
         biome.set_editor_property("ground_material", biome_mats[type_name])
         biome.set_editor_property("wall_material", wall_material)
-        biome.set_editor_property("scatter_materials", scatter_mats)
         biome.set_editor_property("generate_procedural_content", True)
         check_generated(biome, f"Biome_{label}", wall_material)
         stats[label] = check_biome_content(biome, f"Biome_{label}")
@@ -403,6 +431,8 @@ def spawn_portal(actors, portal_class, transform, label, size, frame):
     portal.set_actor_transform(transform, False, False)
     portal.set_editor_property("portal_size", size)
     portal.set_editor_property("frame_thickness", frame)
+    # El marco visible es la malla low-poly del hub o de la pared de vuelta; las cajas solo colisionan (D-32).
+    portal.set_editor_property("show_frame", False)
     return portal
 
 
@@ -435,9 +465,10 @@ def check_hub_portals(pairs):
 def build_hub_map(basic):
     level_subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    art_meshes = check_art_meshes()
     hub_mats = build_hub_instances(basic)
     biome_mats = build_biome_instances(build_terrain_material())
-    scatter_mats = build_scatter_instances(basic)
+    deleted = delete_obsolete_assets()
     if cu.EAL.does_asset_exist(HUB_MAP):
         cu.require(cu.EAL.delete_asset(HUB_MAP), f"No se pudo borrar {HUB_MAP}")
     cu.require(level_subsystem.new_level(HUB_MAP, False), f"No se pudo crear {HUB_MAP}")
@@ -446,7 +477,7 @@ def build_hub_map(basic):
     world.get_world_settings().set_editor_property("force_no_precomputed_lighting", True)
 
     hub = place_hub(actors, hub_mats)
-    biomes, biome_stats = place_biomes(actors, biome_mats, scatter_mats, hub_mats["Wall"], hub)
+    biomes, biome_stats = place_biomes(actors, biome_mats, hub_mats["Wall"], hub)
     pairs = place_hub_portals(actors, hub, biomes)
     check_hub_portals(pairs)
     place_lighting(actors, HUB_SUN_ROTATION, HUB_SKY_INTENSITY)
@@ -455,8 +486,13 @@ def build_hub_map(basic):
 
     cu.require(unreal.EditorLoadingAndSavingUtils.save_map(world, HUB_MAP), f"No se pudo guardar {HUB_MAP}")
     count = len(actors.get_all_level_actors())
-    unreal.log(f"[LiminalContent] {HUB_MAP}: {count} actores, {2 * len(pairs)} portales")
-    materials = list(hub_mats.values()) + list(biome_mats.values()) + list(scatter_mats.values())
+    unreal.log(f"[LiminalContent] {HUB_MAP}: {count} actores, {2 * len(pairs)} portales, {art_meshes} mallas de arte")
+    for label, stats in biome_stats.items():
+        unreal.log(f"[LiminalContent] {label}: {stats['instances']} instancias ({stats['triangles']} triángulos) en "
+                   f"{stats['components']} HISM; vistas desde la puerta: {stats['nearInstances']} ({stats['nearTriangles']} triángulos)")
+    if deleted:
+        unreal.log(f"[LiminalContent] Borrados por obsoletos: {deleted}")
+    materials = list(hub_mats.values()) + list(biome_mats.values())
     assets = [TERRAIN_PATH] + [mi.get_path_name() for mi in materials]
     return count, 2 * len(pairs), assets, biome_stats
 

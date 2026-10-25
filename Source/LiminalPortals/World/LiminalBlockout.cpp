@@ -4,7 +4,10 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
+#include "LiminalPortals.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/PackageName.h"
+#include "World/LiminalArtCatalog.h"
 
 namespace LiminalBlockout
 {
@@ -44,5 +47,22 @@ namespace LiminalBlockout
 		{
 			Component->SetMaterial(0, Material);
 		}
+	}
+
+	UStaticMesh* LoadArtMesh(const FString& MeshName, const UObject* Context)
+	{
+		const FString ObjectPath = LiminalArtCatalog::MakeMeshObjectPath(MeshName);
+		if (ObjectPath.IsEmpty() || !FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(ObjectPath)))
+		{
+			UE_LOG(LogLiminalPortals, Warning, TEXT("%s: falta la malla %s (%s); importar el arte con Tools/content.ps1 -Mode Art."),
+				*GetNameSafe(Context), *MeshName, *ObjectPath);
+			return nullptr;
+		}
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *ObjectPath);
+		if (!Mesh)
+		{
+			UE_LOG(LogLiminalPortals, Warning, TEXT("%s: no se pudo cargar %s."), *GetNameSafe(Context), *ObjectPath);
+		}
+		return Mesh;
 	}
 }

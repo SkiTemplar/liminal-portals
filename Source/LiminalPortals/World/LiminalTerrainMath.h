@@ -77,7 +77,10 @@ namespace LiminalTerrainMath
 		FVector2D GetPoint(int32 IX, int32 IY) const { return Origin + FVector2D(IX * Spacing, IY * Spacing); }
 	};
 
-	/** Malla del terreno lista para UProceduralMeshComponent (colores lineales). */
+	/**
+	 * Malla del terreno lista para UProceduralMeshComponent (colores lineales). Facetada (docs/ARTE.md):
+	 * tres vértices propios por triángulo con la normal y el color de la cara.
+	 */
 	struct FTerrainMesh
 	{
 		TArray<FVector> Vertices;
@@ -132,6 +135,9 @@ namespace LiminalTerrainMath
 	 */
 	LIMINALPORTALS_API int32 GetParcelCrop(int32 IX, int32 IY, int32 Seed);
 
+	/** Sentido de los surcos de la parcela: true si las filas van a lo largo de X (las franjas de color también). */
+	LIMINALPORTALS_API bool IsParcelAlongX(int32 IX, int32 IY, int32 Seed);
+
 	/** Altura del relieve sin la zona llana, en cm (dentro de GetHeightRange). */
 	LIMINALPORTALS_API double SampleRawHeight(const FTerrainParams& Params, double X, double Y);
 
@@ -147,13 +153,21 @@ namespace LiminalTerrainMath
 	 */
 	LIMINALPORTALS_API FTerrainGrid MakeGrid(const FVector2D& Size, double Spacing);
 
+	/**
+	 * Altura de la superficie triangulada de BuildTerrainMesh en (X, Y): interpolación lineal en el
+	 * triángulo de la celda (diagonal de (IX, IY) a (IX + 1, IY + 1)). Es donde se apoyan las instancias;
+	 * fuera de la rejilla se recorta al borde.
+	 */
+	LIMINALPORTALS_API double SampleSurfaceHeight(const FTerrainParams& Params, const FTerrainGrid& Grid, double X, double Y);
+
 	/** Alturas de SampleHeight en cada vértice de Grid (índice IX · NumY + IY). */
 	LIMINALPORTALS_API TArray<double> SampleHeightField(const FTerrainParams& Params, const FTerrainGrid& Grid);
 
 	/**
-	 * Malla de la rejilla: vértices, dos triángulos por celda con la cara frontal hacia +Z según la
-	 * convención de UE (normal = (P1 − P2) × (P0 − P2)), normales y tangentes por diferencias
-	 * centrales, UV de 10 m y colores de SampleColor.
+	 * Malla facetada de la rejilla: dos triángulos por celda con la cara frontal hacia +Z según la
+	 * convención de UE (normal = (P1 − P2) × (P0 − P2)), tres vértices propios por triángulo con la
+	 * normal de la cara, UV de 10 m y el color de SampleColor en el baricentro con una variación de
+	 * brillo de ±4 % por cara.
 	 * @return false (con OutMesh vacío) si la rejilla tiene menos de 2 × 2 vértices.
 	 */
 	LIMINALPORTALS_API bool BuildTerrainMesh(const FTerrainParams& Params, const FTerrainGrid& Grid, FTerrainMesh& OutMesh);

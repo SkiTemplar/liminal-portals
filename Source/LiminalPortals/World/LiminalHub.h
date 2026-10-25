@@ -25,10 +25,12 @@ struct FLiminalHubDoor
 };
 
 /**
- * Hub liminal en blockout (etapa E3): sala cerrada con paredes claras, moqueta, techo con paneles
- * fluorescentes (RectLight) y cuatro huecos de puerta del tamaño del portal con su marco. La
- * geometría sale de LiminalWorldLayout (pura) y se regenera en OnConstruction como instancias de
- * cubo; los portales no son parte del hub: se colocan en GetDoorTransform (Tools/Content/build_content.py).
+ * Hub liminal: sala cerrada con paredes claras (cajas de LiminalWorldLayout) y el atrezo del kit
+ * low-poly de /Game/Art (LiminalHubDressing): moqueta modular, techo de placas con paneles
+ * fluorescentes emisivos alineados con las RectLight, marcos de puerta, rodapiés, rejillas, enchufes,
+ * interruptor, cartel de salida y una silla. Un ISM por pieza; todo se regenera en OnConstruction y
+ * queda guardado en el mapa (D-17). Los portales no son parte del hub: se colocan en GetDoorTransform
+ * (Tools/Content/build_content.py).
  *
  * Origen: centro del suelo de la sala. No hace tick.
  */
@@ -77,10 +79,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hub|Materials")
 	TObjectPtr<UMaterialInterface> CeilingMaterial;
 
-	/** Material emisivo de los paneles (no proyectan sombra ni bloquean su luz). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hub|Materials")
-	TObjectPtr<UMaterialInterface> LightPanelMaterial;
-
 	/**
 	 * Transform de mundo de la puerta Index (origen del portal: centro inferior del hueco, eje X
 	 * hacia el interior de la sala). Fuera de rango devuelve el transform del hub y avisa.
@@ -99,6 +97,7 @@ protected:
 
 private:
 	void Rebuild();
+	void RebuildDressing(const LiminalWorldLayout::FHubLayout& Layout);
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<USceneComponent> Root;
@@ -106,14 +105,16 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<UInstancedStaticMeshComponent> Walls;
 
+	/** Losa del suelo (bajo la moqueta) y losa del techo (sobre las placas). */
 	UPROPERTY(VisibleAnywhere, Category = "Components")
-	TObjectPtr<UInstancedStaticMeshComponent> Carpet;
+	TObjectPtr<UInstancedStaticMeshComponent> Floor;
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
-	TObjectPtr<UInstancedStaticMeshComponent> Ceiling;
+	TObjectPtr<UInstancedStaticMeshComponent> CeilingSlab;
 
+	/** Un ISM por pieza de LiminalArtCatalog::EHubPiece, sin colisión (la dan las cajas y los portales). */
 	UPROPERTY(VisibleAnywhere, Category = "Components")
-	TObjectPtr<UInstancedStaticMeshComponent> LightPanels;
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> Dressing;
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TArray<TObjectPtr<URectLightComponent>> CeilingLights;

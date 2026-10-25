@@ -5,7 +5,9 @@
 #include "Components/LocalFogVolumeComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/RectLightComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -238,6 +240,13 @@ bool FLiminalHubActorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Una instancia por caja de pared"), Walls->GetInstanceCount(), Geometry.Walls.Num());
 	TInlineComponentArray<URectLightComponent*> Lights(Hub);
 	TestEqual(TEXT("Una RectLight por panel"), Lights.Num(), ALiminalHub::NumCeilingLights);
+	const UInstancedStaticMeshComponent* Frames = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Hub, TEXT("Dressing_SM_Hub_DoorFrame_01")));
+	UTEST_NOT_NULL(TEXT("Marcos de puerta"), Frames);
+	TestEqual(TEXT("Un marco low-poly por puerta"), Frames->GetInstanceCount(), Hub->GetNumDoors());
+	TestEqual(TEXT("El marco no colisiona (lo hace el portal)"), Frames->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+	const UInstancedStaticMeshComponent* Panels = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Hub, TEXT("Dressing_SM_Hub_LightPanel_01")));
+	UTEST_NOT_NULL(TEXT("Paneles fluorescentes"), Panels);
+	TestEqual(TEXT("Un panel por RectLight"), Panels->GetInstanceCount(), ALiminalHub::NumCeilingLights);
 
 	// La cápsula del jugador pasa por el hueco de la puerta y no atraviesa la pared de al lado.
 	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(34.f, 88.f);
@@ -273,7 +282,7 @@ bool FLiminalBiomeActorTest::RunTest(const FString& Parameters)
 	UTEST_EQUAL(TEXT("Un terreno"), Terrains.Num(), 1);
 	const UProceduralMeshComponent* Terrain = Terrains[0];
 	TestTrue(TEXT("Terreno transitorio (no se guarda en el mapa)"), Terrain->HasAnyFlags(RF_Transient));
-	TestEqual(TEXT("Terreno de 201 × 201 vértices"), Biome->TerrainVertexCount, 201 * 201);
+	TestEqual(TEXT("Terreno facetado de 160 × 160 celdas a 2,5 m"), Biome->TerrainVertexCount, 160 * 160 * 6);
 	TestTrue(TEXT("El terreno bloquea"), Terrain->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
 	FHitResult Hit;
 	FCollisionQueryParams Query(SCENE_QUERY_STAT(LiminalBiomeTest), true);
@@ -298,6 +307,13 @@ bool FLiminalBiomeActorTest::RunTest(const FString& Parameters)
 	const UInstancedStaticMeshComponent* Wall = Cast<UInstancedStaticMeshComponent>(FindPrimitive(Biome, TEXT("ReturnWall")));
 	UTEST_NOT_NULL(TEXT("Pared exenta"), Wall);
 	TestEqual(TEXT("Dos tramos y dintel"), Wall->GetInstanceCount(), 3);
+	TestFalse(TEXT("Las cajas de la pared solo colisionan (D-32)"), Wall->IsVisible());
+	TestTrue(TEXT("Las cajas de la pared bloquean"), Wall->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
+	const UStaticMeshComponent* WallMesh = Cast<UStaticMeshComponent>(FindPrimitive(Biome, TEXT("ReturnWallMesh")));
+	UTEST_NOT_NULL(TEXT("Malla de la pared"), WallMesh);
+	TestTrue(TEXT("Pared low-poly del bioma (musgo en la selva)"), WallMesh->GetStaticMesh() && WallMesh->GetStaticMesh()->GetName() == TEXT("SM_ReturnWall_Moss_01"));
+	TestEqual(TEXT("La malla de la pared no colisiona"), WallMesh->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+	TestTrue(TEXT("Triángulos contados"), Biome->ScatterTriangleCount > Biome->ScatterInstanceCount && Biome->NearInstanceCount <= Biome->ScatterInstanceCount);
 
 	// Cada tipo tiene un color propio (el suelo de blockout los distingue).
 	const FLinearColor Jungle = ALiminalBiome::GetBiomeBaseColor(ELiminalBiomeType::Jungle);

@@ -214,10 +214,11 @@ bool FLiminalTerrainMeshTest::RunTest(const FString& Parameters)
 
 	FTerrainMesh Mesh;
 	UTEST_TRUE(TEXT("Malla de selva"), BuildTerrainMesh(MakeParams(ELiminalBiomeType::Jungle, 3), Grid, Mesh));
-	TestEqual(TEXT("Un vértice por punto"), Mesh.Vertices.Num(), Grid.Num());
-	TestEqual(TEXT("Dos triángulos por celda"), Mesh.Triangles.Num(), (Grid.NumX - 1) * (Grid.NumY - 1) * 6);
-	TestTrue(TEXT("Normales, tangentes, UV y colores por vértice"), Mesh.Normals.Num() == Grid.Num() && Mesh.Tangents.Num() == Grid.Num()
-		&& Mesh.UVs.Num() == Grid.Num() && Mesh.Colors.Num() == Grid.Num());
+	const int32 NumCorners = (Grid.NumX - 1) * (Grid.NumY - 1) * 6;
+	TestEqual(TEXT("Dos triángulos por celda"), Mesh.Triangles.Num(), NumCorners);
+	TestEqual(TEXT("Facetado: tres vértices propios por triángulo"), Mesh.Vertices.Num(), NumCorners);
+	TestTrue(TEXT("Normales, tangentes, UV y colores por vértice"), Mesh.Normals.Num() == NumCorners && Mesh.Tangents.Num() == NumCorners
+		&& Mesh.UVs.Num() == NumCorners && Mesh.Colors.Num() == NumCorners);
 
 	int32 BadNormals = 0;
 	for (int32 Index = 0; Index < Mesh.Normals.Num(); ++Index)
@@ -227,16 +228,29 @@ bool FLiminalTerrainMeshTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Normales unitarias hacia arriba y perpendiculares a la tangente"), BadNormals, 0);
 
-	// Cara frontal hacia arriba con la convención de UE (KismetProceduralMeshLibrary): (P1 − P2) × (P0 − P2).
+	// Cara frontal hacia arriba con la convención de UE (KismetProceduralMeshLibrary): (P1 − P2) × (P0 − P2),
+	// y normal y color de la cara compartidos por sus tres vértices.
 	int32 Flipped = 0;
+	int32 NotFlat = 0;
 	for (int32 Index = 0; Index + 2 < Mesh.Triangles.Num(); Index += 3)
 	{
-		const FVector& P0 = Mesh.Vertices[Mesh.Triangles[Index]];
-		const FVector& P1 = Mesh.Vertices[Mesh.Triangles[Index + 1]];
-		const FVector& P2 = Mesh.Vertices[Mesh.Triangles[Index + 2]];
-		Flipped += FVector::CrossProduct(P1 - P2, P0 - P2).Z <= 0.0 ? 1 : 0;
+		const int32 I0 = Mesh.Triangles[Index];
+		const int32 I1 = Mesh.Triangles[Index + 1];
+		const int32 I2 = Mesh.Triangles[Index + 2];
+		const FVector Face = FVector::CrossProduct(Mesh.Vertices[I1] - Mesh.Vertices[I2], Mesh.Vertices[I0] - Mesh.Vertices[I2]);
+		Flipped += Face.Z <= 0.0 ? 1 : 0;
+		NotFlat += (!Mesh.Normals[I0].Equals(Face.GetSafeNormal(), 1e-6) || Mesh.Normals[I0] != Mesh.Normals[I1] || Mesh.Normals[I0] != Mesh.Normals[I2]
+			|| Mesh.Colors[I0] != Mesh.Colors[I1] || Mesh.Colors[I0] != Mesh.Colors[I2]) ? 1 : 0;
 	}
 	TestEqual(TEXT("Ningún triángulo mira hacia abajo"), Flipped, 0);
+	TestEqual(TEXT("Normal y color por cara"), NotFlat, 0);
+	// Negativo: caras vecinas con relieve tienen normales distintas (no es un suavizado).
+	int32 DistinctNeighbours = 0;
+	for (int32 Index = 0; Index + 5 < Mesh.Vertices.Num(); Index += 6)
+	{
+		DistinctNeighbours += Mesh.Normals[Index].Equals(Mesh.Normals[Index + 3], 1e-9) ? 0 : 1;
+	}
+	TestTrue(TEXT("Facetas visibles"), DistinctNeighbours > (Grid.NumX - 1) * (Grid.NumY - 1) / 2);
 
 	// Negativos: rejillas inválidas.
 	TestEqual(TEXT("Separación nula, rejilla vacía"), MakeGrid(FVector2D(100.0, 100.0), 0.0).Num(), 0);
@@ -280,5 +294,42 @@ bool FLiminalTerrainFarmTest::RunTest(const FString& Parameters)
 	const FLinearColor Road = SampleColor(Params, 8000.0, 50.0, 0.0);
 	const FLinearColor Field = SampleColor(Params, Farm.OriginX + Farm.ParcelSize.X * 0.5, Farm.ParcelSize.Y * 0.5, 0.0);
 	TestFalse(TEXT("Camino y parcela con colores distintos"), Road.Equals(Field, 0.01f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalTerrainSurfaceHeightTest, "LiminalPortals.World.Terrain.SurfaceHeight", LiminalTerrainMathTests::TerrainTestFlags)
+bool FLiminalTerrainSurfaceHeightTest::RunTest(const FString& Parameters)
+{
+	using namespace LiminalTerrainMath;
+	using namespace LiminalTerrainMathTests;
+	const FTerrainParams Params = MakeParams(ELiminalBiomeType::Desert, 11);
+	const FTerrainGrid Grid = MakeGrid(FVector2D(20000.0, 20000.0), 250.0);
+	FTerrainMesh Mesh;
+	UTEST_TRUE(TEXT("Malla"), BuildTerrainMesh(Params, Grid, Mesh));
+
+	// En los vértices coincide con el campo de alturas y en el baricentro de cada cara con la media de sus vértices.
+	double MaxVertexError = 0.0;
+	double MaxFaceError = 0.0;
+	for (int32 Index = 0; Index + 2 < Mesh.Vertices.Num(); Index += 3 * 37)
+	{
+		const FVector& P0 = Mesh.Vertices[Index];
+		const FVector& P1 = Mesh.Vertices[Index + 1];
+		const FVector& P2 = Mesh.Vertices[Index + 2];
+		MaxVertexError = FMath::Max(MaxVertexError, FMath::Abs(SampleSurfaceHeight(Params, Grid, P0.X, P0.Y) - P0.Z));
+		const FVector Center = (P0 + P1 + P2) / 3.0;
+		MaxFaceError = FMath::Max(MaxFaceError, FMath::Abs(SampleSurfaceHeight(Params, Grid, Center.X, Center.Y) - Center.Z));
+	}
+	TestTrue(FString::Printf(TEXT("Vértices sobre la superficie (%.2e cm)"), MaxVertexError), MaxVertexError < 1e-6);
+	TestTrue(FString::Printf(TEXT("Caras planas (%.2e cm)"), MaxFaceError), MaxFaceError < 1e-6);
+
+	// Negativo: entre vértices, en las dunas, la superficie facetada no es el campo continuo.
+	double MaxGap = 0.0;
+	for (double X = 3000.0; X < 9000.0; X += 173.0)
+	{
+		MaxGap = FMath::Max(MaxGap, FMath::Abs(SampleSurfaceHeight(Params, Grid, X, 4321.0) - SampleHeight(Params, X, 4321.0)));
+	}
+	TestTrue(FString::Printf(TEXT("Facetas distintas del campo continuo (%.2f cm)"), MaxGap), MaxGap > 0.1);
+	// Fuera de la rejilla se recorta al borde.
+	TestNearlyEqual(TEXT("Recorte al borde"), SampleSurfaceHeight(Params, Grid, 50000.0, 0.0), SampleSurfaceHeight(Params, Grid, 10000.0, 0.0), 1e-9);
 	return true;
 }

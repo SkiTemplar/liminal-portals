@@ -64,6 +64,14 @@ public:
 	bool bEmbedded = true;
 
 	/**
+	 * Muestra los montantes y el dintel. Apagado, siguen colisionando pero no se dibujan: lo usan las
+	 * puertas con marco low-poly propio (SM_Hub_DoorFrame, SM_ReturnWall), que ocupan el mismo volumen y
+	 * darían z-fighting (D-32).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Frame")
+	bool bShowFrame = true;
+
+	/**
 	 * Solo de salida: sin superficie visible, sin captura y sin cruce desde él; recibe a quien entra
 	 * por el portal que lo enlaza. Lo usa la calibración (B coincide con A y su superficie taparía la de A).
 	 */

@@ -14,36 +14,42 @@ enum class ELiminalBiomeType : uint8
 };
 
 /**
- * Categoría de instancia dispersada. Cada una es una forma básica del motor con su material
- * (MI_Scatter_<Categoría>, creado por build_content.py) y un componente HISM propio por bioma.
+ * Categoría de instancia dispersada. Cada una tiene una o varias mallas low-poly (variantes) de
+ * /Game/Art, listadas en LiminalArtCatalog; la dispersión elige la variante de cada instancia de forma
+ * determinista y ALiminalBiome crea un HISM por categoría y variante.
  */
 UENUM(BlueprintType)
 enum class ELiminalScatterCategory : uint8
 {
-	TreeTrunk,
-	TreeCrown,
-	Bush,
-	Undergrowth,
-	RockLarge,
-	RockBlock,
-	Pebble,
+	JungleTree,
+	JungleBush,
+	JungleFern,
+	JungleFlower,
+	JungleLog,
+	DesertMesa,
+	DesertArch,
+	DesertRock,
+	DesertPebble,
+	Cactus,
 	DryShrub,
+	IceHorizon,
+	PressureRidge,
 	IceBlock,
-	IcePlate,
+	IceShard,
 	SnowMound,
+	Outcrop,
+	Wheat,
+	Corn,
+	CropRow,
+	FenceSection,
 	FencePost,
-	FenceRail,
 	HayBale,
+	Scarecrow,
+	Barn,
+	FarmTree,
+	FarmBush,
+	FarmRock,
 	Num UMETA(Hidden),
-};
-
-/** Forma básica del motor (/Engine/BasicShapes: 100 cm, centrada en su origen). */
-enum class ELiminalBasicShape : uint8
-{
-	Cube,
-	Sphere,
-	Cylinder,
-	Cone,
 };
 
 namespace LiminalBiomeTypes

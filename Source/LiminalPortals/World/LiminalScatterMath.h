@@ -8,8 +8,9 @@
 /**
  * Dispersión determinista de los biomas (etapa E4): rejilla con jitter (una muestra por celda,
  * separación mínima garantizada), densidad modulada por ruido y exclusión alrededor de la puerta de
- * vuelta y del camino de salida. Las recetas por tipo de bioma componen las formas básicas del motor
- * (100 cm, centradas) en transforms locales del bioma, agrupados por categoría. Funciones puras.
+ * vuelta y del camino de salida. Las recetas por tipo de bioma colocan las mallas low-poly del catálogo
+ * (LiminalArtCatalog: pivote en el centro de la base) en transforms locales del bioma, agrupadas por
+ * categoría y variante. Funciones puras.
  */
 namespace LiminalScatterMath
 {
@@ -32,6 +33,9 @@ namespace LiminalScatterMath
 
 	/** true si el punto, con un radio de huella Margin, toca alguna exclusión. */
 	LIMINALPORTALS_API bool IsExcluded(TConstArrayView<FExclusionCapsule> Exclusions, const FVector2D& Point, double Margin = 0.0);
+
+	/** Distancia con signo a la exclusión llevada a cercanía: 1 en el borde de la exclusión y 0 a Range o más. */
+	LIMINALPORTALS_API double EdgeCloseness(TConstArrayView<FExclusionCapsule> Exclusions, const FVector2D& Point, double Range);
 
 	/** Parámetros de una capa de rejilla con jitter. */
 	struct FJitterGrid
@@ -67,15 +71,31 @@ namespace LiminalScatterMath
 	LIMINALPORTALS_API TArray<FScatterPoint> JitteredGrid(const FJitterGrid& Params, const FBox2D& Area,
 		TConstArrayView<FExclusionCapsule> Exclusions, int32 Seed);
 
-	/** Resultado de la dispersión: transforms locales por categoría. */
+	/**
+	 * Variante (0 .. NumVariants − 1) del punto, elegida con su valor aleatorio número Index: misma
+	 * semilla ⇒ misma variante. Con NumVariants <= 1 devuelve 0.
+	 */
+	LIMINALPORTALS_API int32 PickVariant(const FScatterPoint& Point, int32 Index, int32 NumVariants);
+
+	/** Instancia dispersada: transform local del bioma (pivote de la malla en el centro de su base) y variante. */
+	struct FScatterInstance
+	{
+		FTransform Transform;
+		int32 Variant = 0;
+	};
+
+	/** Resultado de la dispersión: instancias por categoría (variantes de LiminalArtCatalog). */
 	struct FBiomeScatter
 	{
-		TArray<FTransform> Categories[LiminalBiomeTypes::NumScatterCategories];
+		TArray<FScatterInstance> Categories[LiminalBiomeTypes::NumScatterCategories];
 
-		TArray<FTransform>& Get(ELiminalScatterCategory Category) { return Categories[static_cast<int32>(Category)]; }
-		const TArray<FTransform>& Get(ELiminalScatterCategory Category) const { return Categories[static_cast<int32>(Category)]; }
+		TArray<FScatterInstance>& Get(ELiminalScatterCategory Category) { return Categories[static_cast<int32>(Category)]; }
+		const TArray<FScatterInstance>& Get(ELiminalScatterCategory Category) const { return Categories[static_cast<int32>(Category)]; }
 		LIMINALPORTALS_API int32 Num() const;
 	};
+
+	/** Número de instancias de cada variante de la categoría (tamaño = variantes del catálogo). */
+	LIMINALPORTALS_API TArray<int32> CountVariants(const FBiomeScatter& Scatter, ELiminalScatterCategory Category);
 
 	struct FScatterParams
 	{
@@ -101,20 +121,19 @@ namespace LiminalScatterMath
 	using FHeightFunction = TFunctionRef<double(double X, double Y)>;
 
 	/**
-	 * Receta del tipo de bioma: árboles, arbustos y sotobosque (selva); rocas erosionadas (desierto);
-	 * bloques y placas de hielo y montículos de nieve (Antártida); cercas, pacas y árboles aislados
-	 * (cultivos). Ninguna instancia tiene el centro dentro de una exclusión.
+	 * Receta del tipo de bioma con las mallas del catálogo (docs/ARTE.md):
+	 * - selva: árboles altos, arbustos, helechos y flores (más densos en el borde del claro) y troncos caídos;
+	 * - desierto: mesetas y un arco como hitos lejanos en la vista desde el hub, rocas agrupadas, cactus,
+	 *   matorral y guijarros;
+	 * - Antártida: icebergs y seracs en el horizonte, crestas de presión, bloques y esquirlas agrupados,
+	 *   montículos de nieve y afloramientos oscuros;
+	 * - cultivos: trigo, maíz y filas verdes en las parcelas cercanas a la puerta, cercas a lo largo del
+	 *   camino y de algunas parcelas, balas de heno, espantapájaros, granero y árboles sueltos.
+	 * Ninguna instancia tiene el centro dentro de una exclusión. Escala, giro y variante salen del hash de
+	 * cada punto (deterministas).
 	 */
 	LIMINALPORTALS_API FBiomeScatter BuildBiomeScatter(const FScatterParams& Params, FHeightFunction HeightAt);
 
-	/** Hash FNV-1a de todos los transforms cuantizados (0,1 mm, 1e-4 en rotación y escala). */
+	/** Hash FNV-1a de todas las instancias cuantizadas (0,1 mm, 1e-4 en rotación y escala) y sus variantes. */
 	LIMINALPORTALS_API uint32 HashScatter(const FBiomeScatter& Scatter);
-
-	LIMINALPORTALS_API ELiminalBasicShape GetCategoryShape(ELiminalScatterCategory Category);
-
-	/** Solo troncos, rocas grandes y bloques de hielo bloquean (plan E4: colisión en terreno, troncos y rocas). */
-	LIMINALPORTALS_API bool HasCollision(ELiminalScatterCategory Category);
-
-	/** Distancia de desaparición en cm (0 = sin límite) para lo pequeño. */
-	LIMINALPORTALS_API double GetCullDistance(ELiminalScatterCategory Category);
 }

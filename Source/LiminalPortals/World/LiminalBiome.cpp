@@ -3,12 +3,14 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/LocalFogVolumeComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "LiminalPortals.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/LiminalArtCatalog.h"
 #include "World/LiminalBlockout.h"
 #include "World/LiminalScatterMath.h"
 #include "World/LiminalTerrainMath.h"
@@ -58,9 +60,10 @@ namespace LiminalBiomeDetail
 			break;
 		case ELiminalBiomeType::Antarctic:
 			// Neblina alta (1/e cada 37,5 m) que vela el horizonte y el cielo: aproximación de cielo
-			// cubierto con el sol compartido. Cobertura ~50 % a 100 m en horizontal y ~60 % hacia el cielo a 30°.
+			// cubierto con el sol compartido. La densidad radial bajó de 2 (~50 % a 100 m en horizontal) a 0,8
+			// con el arte low-poly (D-33): con 2 los icebergs del horizonte (155-185 m) quedaban borrados.
 			Fog.bEnabled = true;
-			Fog.RadialExtinction = 2.f;
+			Fog.RadialExtinction = 0.8f;
 			Fog.HeightExtinction = 0.03f;
 			Fog.HeightFalloff = 800.f;
 			Fog.PhaseG = 0.1f;
@@ -85,54 +88,6 @@ namespace LiminalBiomeDetail
 		FRandomStream Stream(Seed);
 		return LiminalTerrainMath::DeriveSeeds(Stream);
 	}
-
-	FLinearColor ScatterColor(ELiminalScatterCategory Category, float& OutRoughness)
-	{
-		OutRoughness = 0.85f;
-		switch (Category)
-		{
-		case ELiminalScatterCategory::TreeTrunk:
-			OutRoughness = 0.9f;
-			return FLinearColor(0.12f, 0.07f, 0.035f);
-		case ELiminalScatterCategory::TreeCrown:
-			return FLinearColor(0.04f, 0.16f, 0.03f);
-		case ELiminalScatterCategory::Bush:
-			return FLinearColor(0.05f, 0.20f, 0.04f);
-		case ELiminalScatterCategory::Undergrowth:
-			OutRoughness = 0.8f;
-			return FLinearColor(0.08f, 0.28f, 0.05f);
-		case ELiminalScatterCategory::RockLarge:
-			OutRoughness = 0.9f;
-			return FLinearColor(0.42f, 0.20f, 0.09f);
-		case ELiminalScatterCategory::RockBlock:
-			OutRoughness = 0.9f;
-			return FLinearColor(0.36f, 0.17f, 0.08f);
-		case ELiminalScatterCategory::Pebble:
-			OutRoughness = 0.9f;
-			return FLinearColor(0.30f, 0.20f, 0.12f);
-		case ELiminalScatterCategory::DryShrub:
-			OutRoughness = 0.9f;
-			return FLinearColor(0.16f, 0.15f, 0.06f);
-		case ELiminalScatterCategory::IceBlock:
-			OutRoughness = 0.15f;
-			return FLinearColor(0.50f, 0.70f, 0.85f);
-		case ELiminalScatterCategory::IcePlate:
-			OutRoughness = 0.25f;
-			return FLinearColor(0.62f, 0.78f, 0.90f);
-		case ELiminalScatterCategory::SnowMound:
-			OutRoughness = 0.7f;
-			return FLinearColor(0.85f, 0.88f, 0.92f);
-		case ELiminalScatterCategory::FencePost:
-			return FLinearColor(0.20f, 0.12f, 0.06f);
-		case ELiminalScatterCategory::FenceRail:
-			return FLinearColor(0.24f, 0.15f, 0.08f);
-		case ELiminalScatterCategory::HayBale:
-			OutRoughness = 0.95f;
-			return FLinearColor(0.55f, 0.42f, 0.14f);
-		default:
-			return FLinearColor(0.5f, 0.5f, 0.5f);
-		}
-	}
 }
 
 ALiminalBiome::ALiminalBiome()
@@ -140,19 +95,22 @@ ALiminalBiome::ALiminalBiome()
 	PrimaryActorTick.bCanEverTick = false;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(LiminalBlockout::CubeMeshPath);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
 	CubeMesh = CubeFinder.Succeeded() ? CubeFinder.Object : nullptr;
-	SphereMesh = SphereFinder.Succeeded() ? SphereFinder.Object : nullptr;
-	CylinderMesh = CylinderFinder.Succeeded() ? CylinderFinder.Object : nullptr;
-	ConeMesh = ConeFinder.Succeeded() ? ConeFinder.Object : nullptr;
 
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	Root->SetMobility(EComponentMobility::Static);
 	SetRootComponent(Root);
 
+	// Cajas de la pared: solo colisión (D-32); lo que se ve es ReturnWallMesh.
 	ReturnWall = LiminalBlockout::CreateBoxes(this, TEXT("ReturnWall"), Root, CubeMesh);
+	ReturnWall->SetVisibility(false);
+	ReturnWall->SetCastShadow(false);
+
+	ReturnWallMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ReturnWallMesh"));
+	ReturnWallMesh->SetupAttachment(Root);
+	ReturnWallMesh->SetMobility(EComponentMobility::Static);
+	ReturnWallMesh->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+	ReturnWallMesh->SetCanEverAffectNavigation(false);
 
 	Fog = CreateDefaultSubobject<ULocalFogVolumeComponent>(TEXT("Fog"));
 	Fog->SetupAttachment(Root);
@@ -197,25 +155,15 @@ FString ALiminalBiome::GetBiomeTypeName(ELiminalBiomeType Type)
 	}
 }
 
-TArray<ELiminalScatterCategory> ALiminalBiome::GetAllScatterCategories()
-{
-	TArray<ELiminalScatterCategory> Categories;
-	for (int32 Index = 0; Index < LiminalBiomeTypes::NumScatterCategories; ++Index)
-	{
-		Categories.Add(static_cast<ELiminalScatterCategory>(Index));
-	}
-	return Categories;
-}
-
 FString ALiminalBiome::GetScatterCategoryName(ELiminalScatterCategory Category)
 {
 	const UEnum* Enum = StaticEnum<ELiminalScatterCategory>();
 	return Enum ? Enum->GetNameStringByValue(static_cast<int64>(Category)) : FString::FromInt(static_cast<int32>(Category));
 }
 
-FLinearColor ALiminalBiome::GetScatterColor(ELiminalScatterCategory Category, float& OutRoughness)
+TArray<FString> ALiminalBiome::GetArtMeshNames()
 {
-	return LiminalBiomeDetail::ScatterColor(Category, OutRoughness);
+	return LiminalArtCatalog::GetAllMeshNames();
 }
 
 double ALiminalBiome::GetTerrainHeightAt(const FVector& WorldLocation) const
@@ -226,7 +174,8 @@ double ALiminalBiome::GetTerrainHeightAt(const FVector& WorldLocation) const
 	if (bGenerateProceduralContent)
 	{
 		const LiminalTerrainMath::FBiomeSeeds Seeds = LiminalBiomeDetail::SeedsFor(Seed);
-		Height = LiminalTerrainMath::SampleHeight(LiminalBiomeDetail::MakeTerrainParams(BiomeType, Seeds.Terrain), Local.X, Local.Y);
+		Height = LiminalTerrainMath::SampleSurfaceHeight(LiminalBiomeDetail::MakeTerrainParams(BiomeType, Seeds.Terrain),
+			LiminalTerrainMath::MakeGrid(GroundSize, TerrainSpacing), Local.X, Local.Y);
 	}
 	return ActorTransform.TransformPositionNoScale(FVector(Local.X, Local.Y, Height)).Z;
 }
@@ -272,6 +221,7 @@ void ALiminalBiome::Rebuild()
 		UE_LOG(LogLiminalPortals, Error, TEXT("%s: la puerta de vuelta no cabe en la pared exenta; no se genera la pared."), *GetName());
 	}
 	LiminalBlockout::SetBoxes(ReturnWall, WallBoxes, WallMaterial);
+	ReturnWallMesh->SetStaticMesh(LiminalBlockout::LoadArtMesh(LiminalArtCatalog::GetReturnWallName(BiomeType), this));
 
 	FRandomStream Stream(Seed);
 	BuildProceduralContent(Stream);
@@ -288,8 +238,9 @@ void ALiminalBiome::BuildProceduralContent(FRandomStream& Stream)
 	const LiminalTerrainMath::FBiomeSeeds Seeds = LiminalTerrainMath::DeriveSeeds(Stream);
 	BuildTerrain(Seeds.Terrain);
 	BuildScatter(Seeds.Terrain, Seeds.Scatter);
-	UE_LOG(LogLiminalPortals, Display, TEXT("%s (%s, semilla %d): terreno de %d vértices, %d instancias en %d componentes"),
-		*GetName(), *GetBiomeTypeName(BiomeType), Seed, TerrainVertexCount, ScatterInstanceCount, ScatterComponents.Num());
+	UE_LOG(LogLiminalPortals, Display, TEXT("%s (%s, semilla %d): terreno de %d vértices, %d instancias (%lld triángulos) en %d componentes; vistas desde la puerta: %d instancias, %lld triángulos"),
+		*GetName(), *GetBiomeTypeName(BiomeType), Seed, TerrainVertexCount, ScatterInstanceCount, ScatterTriangleCount,
+		ScatterComponents.Num(), NearInstanceCount, NearTriangleCount);
 }
 
 void ALiminalBiome::DestroyProceduralComponents()
@@ -308,6 +259,9 @@ void ALiminalBiome::DestroyProceduralComponents()
 	}
 	ScatterComponents.Reset();
 	ScatterInstanceCount = 0;
+	ScatterTriangleCount = 0;
+	NearInstanceCount = 0;
+	NearTriangleCount = 0;
 	TerrainVertexCount = 0;
 }
 
@@ -350,46 +304,78 @@ void ALiminalBiome::BuildTerrain(int32 TerrainSeed)
 void ALiminalBiome::BuildScatter(int32 TerrainSeed, int32 ScatterSeed)
 {
 	const LiminalTerrainMath::FTerrainParams TerrainParams = LiminalBiomeDetail::MakeTerrainParams(BiomeType, TerrainSeed);
+	const LiminalTerrainMath::FTerrainGrid Grid = LiminalTerrainMath::MakeGrid(GroundSize, TerrainSpacing);
 	LiminalTerrainMath::FBiomeSeeds Seeds;
 	Seeds.Terrain = TerrainSeed;
 	Seeds.Scatter = ScatterSeed;
 	LiminalScatterMath::FScatterParams Params = LiminalScatterMath::MakeScatterParams(BiomeType, Seeds, GroundSize,
 		LiminalBiomeDetail::ScatterEdgeMargin);
 	Params.Farm = TerrainParams.Farm;
+	// Las instancias se apoyan en la superficie facetada que se dibuja, no en el campo de alturas continuo.
 	const LiminalScatterMath::FBiomeScatter Scatter = LiminalScatterMath::BuildBiomeScatter(Params,
-		[&TerrainParams](double X, double Y) { return LiminalTerrainMath::SampleHeight(TerrainParams, X, Y); });
+		[&TerrainParams, &Grid](double X, double Y) { return LiminalTerrainMath::SampleSurfaceHeight(TerrainParams, Grid, X, Y); });
 
 	for (int32 Index = 0; Index < LiminalBiomeTypes::NumScatterCategories; ++Index)
 	{
-		const TArray<FTransform>& Instances = Scatter.Categories[Index];
-		if (Instances.IsEmpty())
-		{
-			continue;
-		}
 		const ELiminalScatterCategory Category = static_cast<ELiminalScatterCategory>(Index);
-		const FName BaseName(*FString::Printf(TEXT("Scatter_%s"), *GetScatterCategoryName(Category)));
-		UHierarchicalInstancedStaticMeshComponent* Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this,
-			MakeUniqueObjectName(this, UHierarchicalInstancedStaticMeshComponent::StaticClass(), BaseName), RF_Transient);
-		Component->SetStaticMesh(GetShapeMesh(LiminalScatterMath::GetCategoryShape(Category)));
-		Component->SetMobility(EComponentMobility::Static);
-		// Sin navegación (D-17) y colisión solo en troncos, rocas grandes y bloques de hielo.
-		Component->SetCanEverAffectNavigation(false);
-		Component->SetCollisionProfileName(LiminalScatterMath::HasCollision(Category)
-			? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
-		const double CullDistance = LiminalScatterMath::GetCullDistance(Category);
-		if (CullDistance > 0.0)
+		TArray<TArray<FTransform>> ByVariant;
+		ByVariant.SetNum(LiminalArtCatalog::GetNumVariants(Category));
+		for (const LiminalScatterMath::FScatterInstance& Instance : Scatter.Get(Category))
 		{
-			Component->SetCullDistances(FMath::RoundToInt32(CullDistance * 0.8), FMath::RoundToInt32(CullDistance));
+			if (ByVariant.IsValidIndex(Instance.Variant))
+			{
+				ByVariant[Instance.Variant].Add(Instance.Transform);
+			}
 		}
-		Component->SetupAttachment(Root);
-		Component->RegisterComponent();
-		if (const TObjectPtr<UMaterialInterface>* Material = ScatterMaterials.Find(Category); Material && *Material)
+		for (int32 Variant = 0; Variant < ByVariant.Num(); ++Variant)
 		{
-			Component->SetMaterial(0, *Material);
+			if (!ByVariant[Variant].IsEmpty())
+			{
+				AddScatterComponent(Category, Variant, ByVariant[Variant]);
+			}
 		}
-		Component->AddInstances(Instances, false, false, false);
-		ScatterComponents.Add(Component);
-		ScatterInstanceCount += Instances.Num();
+	}
+}
+
+void ALiminalBiome::AddScatterComponent(ELiminalScatterCategory Category, int32 Variant, const TArray<FTransform>& Instances)
+{
+	const TCHAR* MeshName = LiminalArtCatalog::GetVariantNames(Category)[Variant];
+	UStaticMesh* Mesh = LiminalBlockout::LoadArtMesh(MeshName, this);
+	if (!Mesh)
+	{
+		return;
+	}
+	const FName BaseName(*FString::Printf(TEXT("Scatter_%s_%d"), *GetScatterCategoryName(Category), Variant));
+	UHierarchicalInstancedStaticMeshComponent* Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this,
+		MakeUniqueObjectName(this, UHierarchicalInstancedStaticMeshComponent::StaticClass(), BaseName), RF_Transient);
+	Component->SetStaticMesh(Mesh);
+	Component->SetMobility(EComponentMobility::Static);
+	// Sin navegación (D-17); colisión simple de la malla solo en troncos, rocas, hielo, hitos y granero.
+	Component->SetCanEverAffectNavigation(false);
+	Component->SetCollisionProfileName(LiminalArtCatalog::HasCollision(Category)
+		? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
+	Component->SetCastShadow(LiminalArtCatalog::CastsShadow(Category));
+	Component->bAffectDistanceFieldLighting = LiminalArtCatalog::AffectsDistanceFieldLighting(Category);
+	const double CullDistance = LiminalArtCatalog::GetCullDistance(Category);
+	if (CullDistance > 0.0)
+	{
+		Component->SetCullDistances(FMath::RoundToInt32(CullDistance * 0.8), FMath::RoundToInt32(CullDistance));
+	}
+	Component->SetupAttachment(Root);
+	Component->RegisterComponent();
+	Component->AddInstances(Instances, false, false, false);
+	ScatterComponents.Add(Component);
+
+	const int64 Triangles = Mesh->GetNumTriangles(0);
+	ScatterInstanceCount += Instances.Num();
+	ScatterTriangleCount += Triangles * Instances.Num();
+	for (const FTransform& Instance : Instances)
+	{
+		if (CullDistance <= 0.0 || FVector2D(Instance.GetLocation()).Size() <= CullDistance)
+		{
+			++NearInstanceCount;
+			NearTriangleCount += Triangles;
+		}
 	}
 }
 
@@ -409,19 +395,4 @@ void ALiminalBiome::ApplyAtmosphere()
 	Fog->SetFogPhaseG(Settings.PhaseG);
 	Fog->SetFogAlbedo(Settings.Albedo);
 	Fog->SetVisibility(bEnabled);
-}
-
-UStaticMesh* ALiminalBiome::GetShapeMesh(ELiminalBasicShape Shape) const
-{
-	switch (Shape)
-	{
-	case ELiminalBasicShape::Sphere:
-		return SphereMesh;
-	case ELiminalBasicShape::Cylinder:
-		return CylinderMesh;
-	case ELiminalBasicShape::Cone:
-		return ConeMesh;
-	default:
-		return CubeMesh;
-	}
 }

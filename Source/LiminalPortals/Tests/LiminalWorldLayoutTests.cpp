@@ -151,7 +151,8 @@ bool FLiminalHubGeometryTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Esquina cerrada"), AnyContains(Geometry.Walls, FVector(HalfLength + 5.0, HalfWidth + 5.0, 100.0)));
 	TestTrue(TEXT("Suelo con la cara superior en Z = 0"), FMath::IsNearlyZero(Geometry.Floor.Max.Z));
 	TestTrue(TEXT("Suelo bajo las paredes"), Geometry.Floor.Min.X <= -HalfLength - Layout.WallThickness && Geometry.Floor.Max.Y >= HalfWidth + Layout.WallThickness);
-	TestTrue(TEXT("Techo a la altura de la sala"), FMath::IsNearlyEqual(Geometry.Ceiling.Min.Z, Layout.InteriorSize.Z));
+	TestTrue(TEXT("Losa del techo sobre la cámara de las placas"), FMath::IsNearlyEqual(Geometry.Ceiling.Min.Z, Layout.InteriorSize.Z + Layout.CeilingPlenum));
+	TestTrue(TEXT("Las paredes cierran la cámara del techo"), AnyContains(Geometry.Walls, FVector(HalfLength + 5.0, 0.0, Layout.InteriorSize.Z + Layout.CeilingPlenum * 0.5)));
 	TestFalse(TEXT("Interior libre"), AnyContains(Geometry.Walls, FVector(0.0, 0.0, 150.0)));
 	for (const FBox& Panel : Geometry.LightPanels)
 	{

@@ -24,4 +24,10 @@ namespace LiminalBlockout
 
 	/** Sustituye las instancias por las cajas dadas y aplica el material (si no es nulo). */
 	void SetBoxes(UInstancedStaticMeshComponent* Component, TConstArrayView<FBox> Boxes, UMaterialInterface* Material);
+
+	/**
+	 * Carga síncrona de una malla del catálogo de arte (/Game/Art, LiminalArtCatalog). Si el paquete no
+	 * existe (arte sin importar: Tools/content.ps1 -Mode Art) avisa con Context y devuelve nullptr.
+	 */
+	UStaticMesh* LoadArtMesh(const FString& MeshName, const UObject* Context);
 }
