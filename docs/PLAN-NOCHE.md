@@ -60,7 +60,7 @@ Todas quedan en `docs/DECISIONES.md` para que Rodrigo las revise; se pueden reve
 
 ## Estructura de código prevista
 
-```
+```text
 Source/LiminalPortals/
   Portal/LiminalPortalMath.h/.cpp        funciones puras (namespace LiminalPortalMath)
   Portal/LiminalPortal.h/.cpp            ALiminalPortal

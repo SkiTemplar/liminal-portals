@@ -4,6 +4,58 @@ Registro de decisiones de diseño. Las de la sección «Pendientes de revisión�
 durante la sesión nocturna del 2026-10-25 sin validación de Rodrigo: cada una lleva alternativas y
 motivo para poder razonarla y revertirla.
 
+## Índice
+
+Una línea por decisión. **Revisar primero** marca las que cambian la arquitectura, se apartan del README
+original o dejan una decisión de fidelidad pendiente. P-01 a P-12 son las doce de partida de
+`docs/PLAN-NOCHE.md` («Decisiones fijadas para esta noche»); D-01 a D-31 están detalladas más abajo.
+
+| ID | Decisión | Revisar primero |
+|---|---|---|
+| P-01 | Convención del portal: X hacia fuera de la cara visible y paso `Target · Yaw180 · Source⁻¹` (el README original omitía el giro) | **Sí**: arquitectura |
+| P-02 | Cruce solo de frontal a trasero, medido sobre la cámara con el segmento entre fotogramas | |
+| P-03 | Portales empotrados con placa trasera a ~60 cm; vuelta por pared exenta; por detrás no se atraviesa | **Sí**: arquitectura |
+| P-04 | Orden de fotograma en `UpdateCamera`: cruces, recálculo y `CaptureScene()` manual | |
+| P-05 | Captura HDR lineal con superficie unlit y un único post-process global (aspecto por bioma sin post-process) | **Sí**: se aparta del README |
+| P-06 | Recursión cortada: superficies ocultas en las capturas y plano de reserva en su lugar | **Sí**: se aparta del README (1 nivel) |
+| P-07 | Plano cercano con caja fina que se extiende hacia detrás del plano | |
+| P-08 | Iluminación con la opción 1a (sol, cielo y SkyLight compartidos); 1b como experimento | **Sí**: riesgo 1 sin medir |
+| P-09 | Generación procedural en C++ con `FRandomStream` en lugar de grafos PCG | **Sí**: sustituye PCG |
+| P-10 | Sin assets externos: formas básicas del motor y materiales por script | **Sí**: se aparta de la fase 4 |
+| P-11 | Mapa único sin World Partition ni Level Instances; biomas a `k × 20 km` en X | **Sí**: se aparta del README |
+| P-12 | Enhanced Input con acciones y contexto creados en C++ en tiempo de ejecución | |
+| D-01 | Origen del portal a ras de suelo y paso de suelo a suelo | |
+| D-02 | Sin corte de cámara al teletransportar | |
+| D-03 | Rutas y carga síncrona de los materiales del portal | |
+| D-04 | Marco en túnel hasta la placa trasera y medidas de la superficie | |
+| D-05 | Recalcular la cámara con `Super::UpdateCamera(0)` tras el paso | |
+| D-06 | Límite de 10 m por fotograma para contar un cruce | |
+| D-07 | Solo se teletransporta `ALiminalCharacter`, con un único historial de cámara | |
+| D-08 | Ajustes de motor no fijados por el plan (DX12 SM6, distance fields, clip plane a 1 cm, visibilidad sin oclusión) | |
+| D-09 | Pareja de calibración con `bEmbedded` y `bExitOnly` | |
+| D-10 | Lumen activado explícitamente en las capturas (`LumenSurfaceCacheResolution = 1`) | **Sí**: fija coste y memoria de cada captura |
+| D-11 | Sentido del clip plane comprobado en ejecución | |
+| D-12 | Se mantiene TSR | |
+| D-13 | Calibración sin niebla; riesgo de doble niebla abierto | |
+| D-14 | Se acepta que Lumen vea la superficie del portal en sus trazas de pantalla | |
+| D-15 | Procedimiento y métrica de la calibración | |
+| D-16 | Hub en pasillo de 16 × 6 m con cuatro puertas al tresbolillo | |
+| D-17 | Blockout con ISM guardados en el mapa (un cambio de layout exige regenerar `L_Hub`) | |
+| D-18 | Bioma con origen en la puerta de vuelta y pared exenta fina | |
+| D-19 | Método de `Liminal.SelfTest` (Enhanced Input inyectado, paso fijo) | |
+| D-20 | `Liminal.Tour` y criterio de «no negra» | |
+| D-21 | `L_Hub` también como mapa de arranque del editor | |
+| D-22 | Unity build completo sin símbolos repetidos en namespaces anónimos | |
+| D-23 | Terreno y dispersión transitorios regenerados desde la semilla; el terreno no existe para Lumen fuera de pantalla | **Sí**: arquitectura y limitación de Lumen |
+| D-24 | Sol de `L_Hub` de cara a las puertas de vuelta | |
+| D-25 | Niebla local con `ULocalFogVolumeComponent` y parámetros del shader de UE 5.6 | |
+| D-26 | Terreno: ruido, color por vértice, zona llana y recetas de dispersión | |
+| D-27 | Comprobaciones del Tour y lámina | |
+| D-28 | SkyLight de `L_Hub` al doble y suelo de la selva más claro | |
+| D-29 | Método de `Liminal.Bench` y definición del coste por portal | |
+| D-30 | Palancas de coste por portal medidas y sin activar (`CaptureScale 0.73` pendiente de validar visualmente) | **Sí**: decisión de fidelidad pendiente |
+| D-31 | Liberar el estado de render de los portales lejanos sin capturar | **Sí**: ciclo de vida del render |
+
 ## Pendientes de revisión
 
 Las doce decisiones de partida están en `docs/PLAN-NOCHE.md` («Decisiones fijadas para esta noche»).

@@ -4,12 +4,28 @@ Banco de pruebas de rendering en Unreal Engine 5.6 (C++): portales que no cortan
 cruzarlos. No es un juego. Un *hub* liminal con varias puertas fijas; cada puerta muestra en
 tiempo real un bioma generado proceduralmente y se puede atravesar sin corte visible.
 
+Las decisiones tomadas durante la implementación (y las doce de partida de `docs/PLAN-NOCHE.md`)
+están en `docs/DECISIONES.md`, con un índice al principio que marca las que conviene revisar antes.
+
+## Estado
+
+Cifras de la última verificación completa (rama `feat/portales-fases-1-4`, tras la revisión E6;
+ficheros en `Saved/`). El detalle de cada medida está en la sección «Medidas».
+
+| Fase | Estado | Evidencia |
+|---|---|---|
+| 1. Portal fijo hub → caja desplazada | Hecha | Calibración: 0,79 % de diferencia en la máscara sin retraso frente a 16,6 % con un fotograma de retraso (ratio 20,9; aceptación < 2 % y ratio > 3). 52 Automation Tests en verde |
+| 2. Cruce en los dos sentidos | Hecha | `Liminal.SelfTest`: 80 cruces hub → bioma y 80 bioma → hub correctos; error máximo del módulo de la velocidad 1,4e-14 %; 0 de 9141 fotogramas con la cámara detrás de un portal o dentro de geometría. El parpadeo se comprueba por la posición de la cámara, no por imagen |
+| 3. Hub con 4 puertas y biomas en *blockout* | Hecha | 4 puertas y 8 portales enlazados en `L_Hub`; `Liminal.Tour` (13 capturas) pasa `check_tour.py`; coste por portal anotado (con `FRHIGPUFrameTimeHistory` en lugar de `stat gpu`, D-29) |
+| 4. Biomas procedurales | Hecha, con desviación | Cada bioma sale de su semilla con generación en C++ (no PCG) y formas básicas del motor (sin assets externos); tests de determinismo del terreno y de la dispersión; lámina `Saved/Tour/lamina.png` |
+| 5. Pulido y medidas | Parcial | Coste por portal medido: 4,40-4,46 ms de GPU a 1080p, por encima del objetivo provisional de 4 ms. Experimentos de iluminación 1a/1b pendientes: 1a está en uso sin medida comparativa y 1b no se ha probado |
+
 ## Objetivo
 
 - Hub: sala o pasillo liminal (iluminación plana, paredes limpias, silencio) con una puerta por bioma.
 - Cada puerta es una ventana al bioma: se ve en directo, con paralaje correcto, desde cualquier ángulo.
 - Atravesar la puerta no produce corte ni salto de imagen. Cada bioma tiene una puerta de vuelta al hub.
-- Biomas iniciales, generados con PCG y semilla fija:
+- Biomas generados por código con semilla fija (el diseño original pedía PCG; ver «Biomas procedurales»):
   1. Bosque / selva: vegetación densa, sotobosque, niebla baja.
   2. Desierto: dunas, rocas erosionadas, sol duro.
   3. Antártida: hielo, nieve, cielo cubierto, luz difusa.
@@ -20,82 +36,310 @@ tiempo real un bioma generado proceduralmente y se puede atravesar sin corte vis
 
 ### Mundos desplazados
 
-Cada bioma es un *Level Instance* (o sublevel) colocado en el mismo mapa con un desplazamiento
-grande y fijo respecto al hub (p. ej. `k × 20 km` en X). Con Large World Coordinates el
-desplazamiento no tiene problemas de precisión. La física, el audio y la geometría quedan
-separados porque ocupan sitios distintos.
+Hub y biomas son actores del mismo mapa, `/Game/Maps/L_Hub`, sin World Partition ni *Level
+Instances*: `ALiminalHub` en el origen y cada `ALiminalBiome` desplazado `k × 20 km` en X (k = 1..4:
+selva, desierto, Antártida y cultivos). Con Large World Coordinates el desplazamiento no tiene problemas
+de precisión. La física, el audio y la geometría quedan separados porque ocupan sitios distintos.
 
-### Portal (`ALiminalPortal`)
+### Convención del portal y giro de 180°
 
-- Malla plana del marco y la superficie, y una referencia al portal emparejado (`LinkedPortal`).
-- `USceneCaptureComponent2D` y un `UTextureRenderTarget2D` a la resolución del viewport.
-- Cada fotograma, la cámara de captura se coloca en la transformación de la cámara del jugador
-  llevada a través del par de portales: `T_capture = T_linked · Yaw180 · T_portal⁻¹ · T_camera` (el giro de 180° hace que entrar por la cara frontal de A salga por la frontal de B; ver `LiminalPortalMath`). Usa el
-  mismo FOV que la cámara del jugador.
-- Activar el clip plane de la captura en el plano del portal de destino; si no, se ve lo que hay
-  entre la cámara de captura y el portal. Requiere *Support Global Clip Plane for Planar
-  Reflections* en Project Settings.
-- El material de la superficie toma muestras del render target en coordenadas de pantalla
-  (`ScreenPosition`) para que la imagen encaje con la del viewport.
-- La captura se hace con `CaptureScene()` manual, después de que se actualice la cámara (tick
-  tardío o al final de `PlayerCameraManager`), para evitar el fotograma de retraso.
-- Solo se capturan los portales visibles (frustum y orientación). Más adelante, bajar la
-  resolución de los portales lejanos.
+- El eje X local de `ALiminalPortal` apunta hacia fuera de la cara visible. El origen está en el centro
+  inferior del hueco, a ras de suelo (D-01), de modo que el paso conserva el suelo.
+- Entrar por la cara frontal de A sale por la cara frontal de B. La transformación de paso es
+  `Transfer = T_B · Yaw180 · T_A⁻¹`: el giro de 180° alrededor de Z convierte «entrar de frente en A»
+  en «salir de frente en B». En coordenadas locales, (x, y, z) en A pasa a (−x, −y, z) en B. El diseño
+  original omitía este giro.
+- Los portales no se escalan; la escala va en los componentes.
+- Se cruza solo de la cara frontal a la trasera. Cada portal está empotrado: marco en túnel y placa
+  trasera sólida a 60 cm del plano (D-04), así que por detrás no se puede atravesar.
+
+### Portal (`ALiminalPortal`) y subsistema (`ULiminalPortalSubsystem`)
+
+- Malla del marco, superficie, placa trasera, plano de reserva y referencia al portal emparejado
+  (`LinkedPortal`).
+- `USceneCaptureComponent2D` con `bCaptureEveryFrame = false`, `bAlwaysPersistRenderingState = true` y
+  captura en HDR lineal (`SCS_SceneColorHDR`, render target `RTF_RGBA16f` del tamaño del viewport por
+  `RenderTargetScale`). La superficie es unlit y emite el render target en coordenadas de pantalla
+  (`ScreenPosition`), de modo que el tonemapper del viewport se aplica una sola vez.
+- Orden de fotograma: `ALiminalPlayerCameraManager::UpdateCamera` llama a `Super` y después a
+  `ULiminalPortalSubsystem::UpdatePortals`, que (1) detecta cruces, teletransporta el pawn y recalcula la
+  cámara (D-05) y (2) coloca la cámara de cada portal visible en `Transfer · T_camera`, con el FOV del
+  jugador, y llama a `CaptureScene()`. Así no hay fotograma de retraso.
+- Clip plane en el plano del portal de destino, 1 cm por detrás (`r.AllowGlobalClipPlane=True`). El
+  sentido se comprobó en ejecución (D-11).
+- Visibilidad aproximada por esfera envolvente y cono del frustum, sin oclusión (D-08).
+- Lumen en las capturas: UE 5.6 lo apaga en las `SceneCapture` salvo que la captura lo sobrescriba;
+  cada captura copia el método de GI y de reflejos del proyecto y fija `LumenSurfaceCacheResolution = 1`
+  (D-10).
+- Recursión cortada: cada captura oculta todas las superficies de portal; a través de un portal se ve
+  el plano de reserva (`bVisibleInSceneCaptureOnly`, color liminal plano) del portal que haya detrás.
+- Plano cercano: la superficie es una caja fina que se extiende hacia detrás del plano (de 1 a 40 cm)
+  cuando la cámara está a menos de 60 cm por delante.
+- Estado de render: los portales que llevan 10 s sin capturarse y están a 100 m o más de la cámara
+  liberan su `FSceneViewState` (y su escena de Lumen); la siguiente captura lo recrea (D-31).
 
 ### Cruce
 
-- El cruce se detecta cuando el signo de `dot(CameraPos − PortalPos, PortalNormal)` cambia con el
-  punto dentro de los límites del portal. Se mide sobre la cámara, no sobre la cápsula.
-- Al cruzar se aplica `T_linked · Yaw180 · T_portal⁻¹` a la posición, rotación y velocidad del pawn.
-  Así se mantiene el movimiento sin saltos.
-- Mientras la cámara está a menos de la distancia del plano cercano, se da grosor a la superficie
-  del portal (o se renderiza como caja). Así se evita el parpadeo del plano cercano.
+- Se detecta sobre la cámara, no sobre la cápsula: el segmento entre la posición del fotograma
+  anterior y la actual corta el plano de frente a atrás dentro del rectángulo del hueco. Saltos de más
+  de 10 m por fotograma no cuentan (D-06).
+- Al cruzar se aplica `Transfer` a la posición, la rotación de control y la velocidad del pawn; el
+  módulo de la velocidad se conserva y la dirección gira con el portal. Solo se teletransporta un
+  `ALiminalCharacter` (D-07). No se marca corte de cámara (D-02).
+
+### Iluminación y post-process
+
+- Opción 1a del riesgo 1: un sol, `SkyAtmosphere` y `SkyLight` compartidos por todo el mapa; el hub es
+  una sala cerrada iluminada con `RectLight`.
+- Un único post-process global con exposición manual fija. Como la captura es HDR lineal y se tonemapea
+  una sola vez en el viewport, el aspecto de cada bioma sale de la niebla local (`ULocalFogVolumeComponent`),
+  el terreno y los materiales, no de un post-process por bioma; así no hay salto de color al cruzar.
 
 ### Lógica pura con tests
 
-La matemática va en funciones puras sin `UWorld`, con su Automation Test:
-
-- transformación a través del par de portales (posición, rotación, velocidad),
-- detección de cruce de plano con límites,
-- cálculo del clip plane del destino.
+La matemática que mueve números va en funciones puras sin `UWorld`, con su Automation Test (caso
+positivo y negativo): paso entre portales (punto, dirección, rotación, transform), detección de cruce
+con límites, clip plane del destino, visibilidad, grosor de la superficie, tamaño del render target,
+liberación del estado de render, geometría del hub y de los biomas, terreno, dispersión, comprobaciones
+del SelfTest, secuencia de la calibración y estadísticos del Bench.
 
 ### Ajustes del proyecto
 
-- `r.DefaultFeature.MotionBlur=False`: la captura no tiene motion blur, pero se aplicaría a la
-  superficie del portal.
-- Exposición fija (Manual) o la misma en el viewport y en las capturas.
-- En cada captura: GI y reflejos con Lumen, `SceneCaptureResolutionScale = 1` y *Always Persist
-  Rendering State* si se captura con `CaptureScene()`. UE 5.6 desactiva Lumen en las capturas salvo
-  que la captura lo sobrescriba en sus *Post Process Settings*; `ALiminalPortal` copia el método del
-  proyecto en cada captura (ver `docs/DECISIONES.md`, D-10).
-- Revisar el antialiasing: TSR en la captura no tiene histórico propio y puede verse distinta
-  del viewport.
+- `r.DefaultFeature.MotionBlur=False` y `r.DefaultFeature.AutoExposure=False`.
+- Lumen GI y reflejos, D3D12 con SM6 y `r.GenerateMeshDistanceFields=True` (D-08).
+- Antialiasing TSR (D-12): las capturas `SCS_SceneColorHDR` no pasan por post-proceso y la vista
+  principal aplica TSR una vez sobre la superficie.
+- `GameDefaultMap` y `EditorStartupMap`: `/Game/Maps/L_Hub` (D-21).
 
-## Riesgos abiertos (experimentos del banco de pruebas)
+## Estructura del código
 
-1. **Iluminación distinta por bioma**: el sol y la `SkyAtmosphere` son casi globales. Opciones a medir:
-   a) un sol compartido, con niebla, post-process y materiales por bioma;
-   b) una luz direccional por bioma separada con *lighting channels* (comprobar con Lumen);
-   c) renderizar los biomas desde un `UWorld` separado (lo más fiel y lo más caro de implementar).
-2. **Lumen en las capturas**: coste y diferencias de tono en el borde del portal.
-3. **Coste por portal**: cada portal visible es un render de escena adicional.
-4. **Recursión** (un portal visto a través de otro): limitarla a 1 nivel o cortarla.
+```text
+Source/LiminalPortals/
+  LiminalPortals.*                       módulo y categoría de log LogLiminalPortals
+  LiminalPortalsSettings.*               ULiminalPortalsSettings (DefaultGame.ini): materiales, escala y tamaño máximo del render target
+  Portal/LiminalPortalMath.*             funciones puras del portal (namespace LiminalPortalMath)
+  Portal/LiminalPortal.*                 ALiminalPortal: marco, superficie, reserva, placa y captura
+  Portal/LiminalPortalSubsystem.*        ULiminalPortalSubsystem (UWorldSubsystem): cruces, capturas y CVars Liminal.Portal*
+  Player/LiminalPlayerCameraManager.*    orden de fotograma (UpdateCamera → subsistema)
+  Player/LiminalCharacter.*              primera persona con Enhanced Input creado en C++
+  Player/LiminalPlayerController.*, LiminalGameMode.*
+  World/LiminalWorldLayout.*             geometría pura del hub y de los biomas en blockout
+  World/LiminalBlockout.*                cajas con ISM compartidas por hub y biomas
+  World/LiminalHub.*                     ALiminalHub (OnConstruction)
+  World/LiminalBiome.*, LiminalBiomeTypes.h   ALiminalBiome: terreno, dispersión y niebla por tipo y semilla
+  World/LiminalTerrainMath.*             campo de alturas, color y malla del terreno (puras)
+  World/LiminalScatterMath.*             dispersión determinista con exclusiones (pura)
+  Debug/LiminalDebugCommands.*           registro de las órdenes Liminal.*
+  Debug/LiminalCalibration*.*            Liminal.Calibrate y su matemática pura
+  Debug/LiminalSelfTest*.*               Liminal.SelfTest y sus comprobaciones puras
+  Debug/LiminalTour.*                    Liminal.Tour
+  Debug/LiminalBench*.*                  Liminal.Bench, estadísticos y poses fijas
+  Debug/LiminalDebugWorld.*, LiminalDebugShared.h   utilidades comunes de las ejecuciones de depuración
+  Tests/*.cpp                            Automation Tests (52)
+Tools/
+  build.ps1, test.ps1, content.ps1, verify.ps1, common.ps1
+  Content/build_content.py, content_utils.py   materiales y mapas creados por script
+  Verify/compare_calibration.py, check_tour.py, make_lamina.py (+ tests de Python)
+```
 
-## Fases y criterios de aceptación
+## Controles
 
-| Fase | Entregable | Aceptación |
+| Acción | Teclado y ratón | Mando |
 |---|---|---|
-| 1 | Un portal fijo hub → caja de prueba desplazada | La imagen del portal coincide con la del viewport (sin desfase al girar rápido); tests de transformación en verde |
-| 2 | Cruce en los dos sentidos | Cruzar 20 veces seguidas sin parpadeo ni salto; la velocidad se conserva (test) |
-| 3 | Hub liminal con 4 puertas y biomas en *blockout* | 4 portales funcionando; `stat gpu` con el coste por portal anotado en este README |
-| 4 | Biomas con PCG y assets | Cada bioma generado desde una semilla y reproducible; lámina de capturas de los 4 |
-| 5 | Pulido y medidas | Experimentos de iluminación 1a/1b documentados; objetivo provisional ≤ 4 ms por portal a 1080p |
+| Moverse | W A S D | stick izquierdo |
+| Mirar | ratón | stick derecho |
+| Saltar | barra espaciadora | botón inferior |
+| Correr (de 400 a 700 cm/s mientras se mantiene) | Mayús izquierda | pulsar el stick izquierdo |
+
+`UInputAction` y `UInputMappingContext` se crean en C++ en tiempo de ejecución (no hay assets de entrada).
+
+## Compilar, generar contenido y verificar
+
+Con el editor abierto, la compilación por línea de comandos falla por Live Coding: cerrarlo antes. La
+primera vez, clic derecho en `LiminalPortals.uproject` → *Generate Visual Studio project files*.
+
+```powershell
+powershell -File Tools/build.ps1                  # editor (Development), unity build completo (D-22)
+powershell -File Tools/build.ps1 -Target Game     # juego
+powershell -File Tools/test.ps1 [-Filter <prefijo>]   # Automation Tests sin interfaz; falla si no se ejecuta ninguno
+```
+
+### Regenerar contenido
+
+```powershell
+powershell -File Tools/content.ps1
+```
+
+Lanza `UnrealEditor-Cmd -run=pythonscript` con `Tools/Content/build_content.py` (idempotente) y
+comprueba `Saved/Content/build_content.json`. Crea los materiales (`M_PortalSurface`, `M_PortalFallback`,
+`M_Basic`, `M_Terrain` y sus instancias), `/Game/Maps/L_Calibration` y `/Game/Maps/L_Hub` (hub, cuatro
+biomas, ocho portales enlazados, sol, cielo, `SkyLight` y post-process global). Hay que cerrar el editor
+antes (bloquea los paquetes). Cuándo regenerar:
+
+- cambios en el layout del hub o de la pared de vuelta (`LiminalWorldLayout`): las cajas del blockout se
+  guardan en el mapa y en `-game` no se vuelve a ejecutar `OnConstruction` (D-17);
+- cambios en `build_content.py` (sol, cielo, materiales, colocación).
+
+El terreno y la dispersión no se guardan en el mapa: se regeneran desde la semilla en `BeginPlay`
+(D-23), así que cambiar sus recetas en C++ no exige regenerar.
+
+### Verificaciones con render real (`Tools/verify.ps1`)
+
+No son Automation Tests: lanzan el juego con RHI, ejecutan una orden `Liminal.*` y comprueban el informe.
+Fallan si el juego sale con un código distinto de 0 o si el informe no cumple; no dan por buenos
+informes de ejecuciones anteriores.
+
+| Modo | Qué hace | Qué mide y cuándo falla |
+|---|---|---|
+| `-Calibrate` | `L_Calibration` a 1280 × 720, dos ejecuciones de `Liminal.Calibrate` con `Liminal.Portal.LagFrames 0` y `1` | Diferencia media en RGB dentro de la máscara del portal entre la pasada con superficie visible y la oculta; falla si sin retraso no es < 2 % o si el control no es > 3 veces mayor. `Saved/Calibration/result.json` |
+| `-Calibrate -ClipPlaneCheck` | Añade una ejecución con `Liminal.Portal.FlipClipPlane 1` | Informativa: con la normal invertida la diferencia tiene que dispararse |
+| `-SelfTest` | `L_Hub` con paso fijo de 1/60 s y `Liminal.SelfTest` (20 ciclos por puerta con entrada inyectada en Enhanced Input) | Por cruce: portales esperados, salto, módulo (1 %) y dirección (0,5°) de la velocidad, posición (1 cm); por fotograma: cámara fuera del volumen de detrás de cada portal y sin solapar geometría. `Saved/SelfTest.json` |
+| `-SelfTest -SelfTestNegative` | Añade el control negativo `Liminal.Portal.DebugVelocityScale 0.97` | La prueba tiene que fallar en las cuatro puertas |
+| `-Tour` | `L_Hub` con `Liminal.Tour`: 13 capturas (hub y, por puerta, desde el hub, desde el bioma y desde dentro) en `Saved/Tour/` | `check_tour.py`: luminancia media entre 15 y 245, desviación > 6, hueco del portal distinto del marco (> 20) y con detalle (> 4), pared de vuelta iluminada (≥ 150) y primer plano no negro (≤ 25 % de píxeles < 20). `Saved/Tour/result.json` y `lamina.png` |
+| `-Bench` | `L_Hub` a 1920 × 1080 en ventana, `r.VSync 0`, `t.MaxFPS 0`, dos ejecuciones de `Liminal.Bench` | Tiempo de GPU, render thread y game thread en cinco poses fijas (0, 1, 2, 4 portales y 4 apagados), 120 fotogramas de calentamiento y 240 medidos; falla si algún caso no tiene las capturas esperadas y avisa si el coste por portal difiere un 25 % o más. `Saved/Bench_run{1,2}.json`, `Saved/BenchResult.json` |
+
+Parámetros comunes: `-ExecCmds '...'` (órdenes de consola previas), `-ResX`/`-ResY` (1280 × 720),
+`-TimeoutMinutes` (45); de `-Bench`: `-BenchResX`/`-BenchResY`, `-BenchFrames`, `-BenchWarmup` y
+`-BenchMaxRelativeDiff`.
+
+### CVars de experimento y diagnóstico
+
+| CVar | Uso |
+|---|---|
+| `Liminal.Portals.Enable` | Apaga todas las capturas (caso de referencia del Bench) |
+| `Liminal.Portal.LagFrames` | Captura con la pose de N fotogramas antes (control negativo de la calibración) |
+| `Liminal.Portal.FlipClipPlane` | Invierte la normal del clip plane (comprobación de D-11) |
+| `Liminal.Portal.DebugVelocityScale` | Escala la velocidad tras cada paso (control negativo del SelfTest) |
+| `Liminal.Portal.CaptureScale` | Escala del render target (0 = la de `ULiminalPortalsSettings::RenderTargetScale`) |
+| `Liminal.Portal.CaptureReflectionMethod` | Método de reflejos de las capturas (−1 = el del proyecto) |
+| `Liminal.Portal.ReleaseIdleSeconds`, `Liminal.Portal.ReleaseDistance` | Liberación del estado de render (10 s, 100 m; 0 s la desactiva) |
+
+## Medidas
+
+### Calibración del portal (fase 1)
+
+`/Game/Maps/L_Calibration` tiene un portal A y su pareja B en el mismo sitio mirando a lados
+opuestos, así que el paso es la identidad y lo que se ve por el portal debe coincidir con lo que se
+vería sin él. `Liminal.Calibrate` gira la cámara 10° por fotograma delante del portal en dos pasadas
+idénticas (superficie visible y oculta) y guarda las capturas y la máscara del portal;
+`Tools/Verify/compare_calibration.py` compara dentro de la máscara (D-15).
+
+| Medida (1280×720, TSR, Lumen) | Diferencia media en la máscara |
+|---|---|
+| `LagFrames 0` (orden de fotograma correcto) | 0,79 % tras E6 (0,75-0,81 % en E2) |
+| `LagFrames 1` (control: pose del fotograma anterior) | 16,6 % (ratio 20,9) |
+| Clip plane invertido (`-ClipPlaneCheck`, E2) | 47,4 % |
+
+Aceptación: < 2 % sin retraso y > 3 veces ese valor con retraso. FXAA y TAA dan lo mismo que TSR;
+el residuo es de Lumen (con Lumen apagado, 0,26 %).
+
+### Hub y cruce (fases 2 y 3)
+
+`ALiminalHub` es un pasillo cerrado de 16 × 6 × 3,2 m con moqueta, paneles fluorescentes con `RectLight`
+y cuatro puertas de 140 × 230 cm al tresbolillo (D-16). La geometría sale de funciones puras
+(`World/LiminalWorldLayout`).
+
+| Medida (1280×720, paso fijo 1/60 s) | Resultado |
+|---|---|
+| Cruces por sentido (4 puertas × 20) | 80 hub → bioma y 80 bioma → hub, todos correctos |
+| Error máximo del módulo de la velocidad | 1,4e-14 % (tolerancia 1 %) |
+| Error máximo de dirección / posición | 1,2e-6° / 2e-9 cm |
+| Fotogramas con la cámara detrás de un portal o dentro de geometría | 0 de 9141 |
+| Control negativo (velocidad al 97 % tras el paso) | falla en las 4 puertas (3 %) |
+
+### Biomas procedurales (fase 4)
+
+Cada `ALiminalBiome` genera desde su semilla (`FRandomStream` → `LiminalTerrainMath::DeriveSeeds`) un
+terreno de 400 × 400 m a 2 m (`UProceduralMeshComponent` con colisión y color por vértice) y la
+dispersión con formas básicas del motor (un HISM por categoría, `MI_Scatter_*`), más niebla local en la
+selva y la Antártida. Son componentes transitorios: se regeneran en `OnConstruction` y en `BeginPlay`, no
+se guardan en el mapa (D-23). La puerta de vuelta y 30 m de camino de salida quedan llanos a ras del
+portal y sin dispersión. Detalle de parámetros en `docs/DECISIONES.md`, D-23 a D-28.
+
+| Bioma (semilla) | Relieve | Dispersión | Instancias |
+|---|---|---|---|
+| Selva (1001) | irregular, −5,5/+6,5 m | árboles (tronco + 1-2 copas), arbustos, sotobosque; niebla baja | 11 201 |
+| Desierto (1002) | dunas orientadas, hasta 8,1 m | rocas erosionadas (esferas y cubos aplastados), guijarros, matojos | 1539 |
+| Antártida (1003) | ondulación ±2,9 m y sastrugi | bloques y placas de hielo, montículos de nieve; neblina | 889 |
+| Cultivos (1004) | llano ±0,9 m con caballones | parcelas de color alterno, caminos, cercas, pacas, árboles aislados | 3318 |
+
+| Medida (1280×720, `Liminal.Tour` tras E6) | Resultado |
+|---|---|
+| Generación de los cuatro biomas en `BeginPlay` | 0,36 s (E4) |
+| Luminancia media de las 13 capturas (0-255) | 82-219; recuadro central 139-226 (umbral 15-245) |
+| Hueco frente al marco en las vistas de puerta (distancia RGB media) | 105-213 (umbral 20) |
+| Pared de vuelta vista desde el bioma (luminancia) | 215-223 (umbral 150, D-24) |
+| Primer plano oscuro en las vistas desde dentro | 0 % de píxeles < 20 (máximo 25 %, D-28) |
+
+### Coste por portal (fase 5 parcial)
+
+`Liminal.Bench` coloca la cámara en cinco poses fijas de `L_Hub` (0, 1, 2 y 4 portales visibles y la vista
+del caso de 4 con `Liminal.Portals.Enable 0`), comprueba en cada fotograma medido que el subsistema hace las
+capturas esperadas, calienta 120 fotogramas y mide 240 por caso: tiempo de GPU del fotograma
+(`FRHIGPUFrameTimeHistory`, la serie de `RHIGetGPUFrameCycles`), render thread y game thread (D-29).
+
+Equipo: NVIDIA GeForce RTX 4060 Laptop GPU, D3D12 (SM6), ventana de 1920 × 1080 (pantalla de 2560 × 1440),
+`r.VSync 0`, `t.MaxFPS 0`, TSR, Lumen GI y reflejos. Render target de las capturas: 1920 × 1080; la vista
+principal se renderiza al 73 % y TSR la escala.
+
+| Caso (ejecución 2, tras E6) | Capturas por fotograma | GPU media / p50 / p95 (ms) | Render thread (ms) | Game thread (ms) |
+|---|---|---|---|---|
+| 0 portales | 0 | 10,89 / 10,62 / 12,50 | 11,32 | 1,42 |
+| 1 portal | 1 | 16,16 / 16,18 / 17,87 | 17,30 | 1,43 |
+| 2 portales | 2 | 24,52 / 24,40 / 26,58 | 26,14 | 1,48 |
+| 4 portales | 4 | 28,69 / 28,79 / 30,46 | 31,59 | 1,60 |
+| Vista de 4 con portales apagados | 0 | 10,86 / 10,57 / 12,54 | 11,42 | 1,33 |
+
+| Coste por portal a 1080p | Ejecución 1 | Ejecución 2 |
+|---|---|---|
+| GPU, (4 portales − apagados) / 4 | 4,40 ms | 4,46 ms (diferencia 1,4 %) |
+| GPU, pendiente sobre 0, 1, 2 y 4 | 4,40 ms | 4,51 ms (diferencia 2,4 %) |
+| Game thread, (4 − apagados) / 4 | 0,05 ms | 0,07 ms |
+
+En las cuatro ejecuciones de E5 el coste emparejado fue de 4,29-4,43 ms (D-30). Depende de lo que muestra
+cada portal: frente a la vista de 0 portales, el caso de 1 sale a 5,1-5,3 ms y el de 2 (selva y Antártida) a
+6,6-6,8 ms por portal, pero esas vistas también cambian lo que se ve del hub; el emparejado con los portales
+apagados es la cifra de referencia. El render thread coincide con el tiempo de fotograma porque la GPU es el
+cuello de botella (incluye la espera).
+
+Palancas medidas en E5 y no activadas (D-30): `Liminal.Portal.CaptureScale 0.73` (render target a la
+resolución interna de la vista principal, 1402 × 788) baja el coste a 3,15-3,22 ms con la calibración en
+0,81 % a 1080p; los reflejos en pantalla en las capturas (`CaptureReflectionMethod 2`) no ahorran nada
+medible (4,18-4,37 ms).
+
+## Riesgos abiertos
+
+1. **Coste por portal por encima del objetivo**: ~4,4 ms de GPU por portal a 1080p frente a los 4 ms
+   provisionales; con cuatro portales en pantalla el fotograma pasa de 10,9 a 28,7 ms. La palanca
+   `CaptureScale 0.73` cumple (3,15-3,22 ms), pero la calibración no sirve para juzgarla: con menos
+   resolución la diferencia baja porque el reescalado promedia el ruido de Lumen, y la sala de calibración
+   apenas tiene bordes. **Pendiente de validar visualmente** con una captura antes de activarla; además el
+   valor 0,73 solo vale para 1080p (a 720p la vista principal va al 100 %), así que lo correcto sería seguir
+   la fracción de resolución de la vista principal en cada fotograma.
+2. **Iluminación distinta por bioma** (fase 5, sin hacer): el sol y la `SkyAtmosphere` son casi globales.
+   En uso, la opción a) un sol compartido, con niebla y materiales por bioma; la SkyLight de `L_Hub` está al
+   doble para que la selva no quede negra (D-28) y la Antártida tiene sombras duras con el sol compartido.
+   Faltan por medir b) una luz direccional por bioma separada con *lighting channels* (comprobar con Lumen)
+   y c) renderizar los biomas desde un `UWorld` separado (lo más fiel y lo más caro de implementar).
+3. **El terreno no existe para Lumen fuera de pantalla**: `UProceduralMeshComponent` no genera mesh distance
+   field ni cards de Lumen en UE 5.6 (sin rebote difuso del suelo, sin oclusión de cielo ni reflejos). Pasar
+   a `UStaticMesh`, Landscape o un proxy oculto queda abierto (D-23).
+4. **Memoria de Lumen en las capturas**: cada portal con estado persistente tiene su propia escena de Lumen
+   con el atlas completo; D-31 libera los lejanos, pero la memoria no se ha medido (`rhi.DumpResourceMemory`)
+   y al volver a ver un portal liberado su luz indirecta tarda unos fotogramas en converger.
+5. **Lumen y la superficie del portal**: las trazas de pantalla de Lumen ven la imagen del destino en la
+   superficie y aclaran el suelo de delante del portal (D-14); el residuo de la calibración (0,79 %) también
+   es de Lumen.
+6. **Recursión**: cortada a cero niveles; a través de un portal se ve el plano de reserva del portal que haya
+   detrás, no su destino.
+7. **Niebla**: no hay doble aplicación con el layout actual (D-25), pero no se ha medido con una variante de
+   la calibración con niebla (D-13).
 
 ## Assets
 
-Por decidir en la fase 4: Fab (Megascans), CC0 (Poly Haven, Quaternius, Kenney) o kits propios
-en Blender con el agente `technical-artist`. Estilo: escena liminal, limpia y algo irreal, no
-fotorrealismo de catálogo.
+Sin assets externos por ahora: formas básicas del motor y materiales creados por script. Por decidir:
+Fab (Megascans), CC0 (Poly Haven, Quaternius, Kenney) o kits propios en Blender con el agente
+`technical-artist`. Estilo: escena liminal, limpia y algo irreal, no fotorrealismo de catálogo.
 
 ## Fuera de alcance
 
@@ -107,119 +351,3 @@ Portales colocados por el jugador, multijugador, objetos que atraviesan el porta
 - Titanfall 2, *Effect and Cause*: dos niveles en el mismo mapa y teletransporte entre ellos.
 - Plugin *Streaming Portal Levels* (documentación con ajustes de Lumen y de la captura para UE 5.2+).
 - Hilo «Lumen and SceneCapture2D in UE 5.3.2» en los foros de Epic.
-
-## Compilar y probar
-
-```powershell
-powershell -File Tools/build.ps1                  # editor (Development)
-powershell -File Tools/build.ps1 -Target Game     # juego
-powershell -File Tools/test.ps1                   # Automation Tests sin interfaz
-powershell -File Tools/content.ps1                # materiales y mapas por script (Tools/Content)
-powershell -File Tools/verify.ps1 -Calibrate      # calibración del portal con RHI (fase 1)
-powershell -File Tools/verify.ps1 -SelfTest [-SelfTestNegative]   # cruces hub <-> bioma (fases 2 y 3)
-powershell -File Tools/verify.ps1 -Tour           # capturas del hub y de cada puerta en Saved/Tour/
-powershell -File Tools/verify.ps1 -Bench          # coste por portal a 1920x1080, dos ejecuciones (fase 5)
-```
-
-### Calibración del portal (fase 1)
-
-`/Game/Maps/L_Calibration` tiene un portal A y su pareja B en el mismo sitio mirando a lados
-opuestos, así que el paso es la identidad y lo que se ve por el portal debe coincidir con lo que se
-vería sin él. `Liminal.Calibrate` gira la cámara 10° por fotograma delante del portal en dos pasadas
-idénticas (superficie visible y oculta) y guarda las capturas y la máscara del portal;
-`Tools/verify.ps1 -Calibrate` lo lanza con `Liminal.Portal.LagFrames 0` y `1` y compara dentro de la
-máscara (`Tools/Verify/compare_calibration.py`, resultado en `Saved/Calibration/result.json`).
-
-| Medida (1280×720, TSR, Lumen) | Diferencia media en la máscara |
-|---|---|
-| `LagFrames 0` (orden de fotograma correcto) | 0,75-0,81 % |
-| `LagFrames 1` (control: pose del fotograma anterior) | 16,6 % (ratio > 20) |
-| Clip plane invertido (`-ClipPlaneCheck`) | 47,4 % |
-
-Aceptación: < 2 % sin retraso y > 3 veces ese valor con retraso. FXAA y TAA dan lo mismo que TSR;
-el residuo es de Lumen (con Lumen apagado, 0,26 %).
-
-### Hub, cruce y biomas en blockout (fases 2 y 3)
-
-`/Game/Maps/L_Hub` (mapa por defecto) lo genera `Tools/content.ps1`: `ALiminalHub` en el origen (pasillo
-cerrado de 16 × 6 × 3,2 m, moqueta, paneles fluorescentes con `RectLight` y cuatro puertas de
-140 × 230 cm al tresbolillo), cuatro `ALiminalBiome` en k × 20 km (selva, desierto, Antártida y
-cultivos: suelo de color y pared exenta con la puerta de vuelta) y ocho portales enlazados por parejas.
-La geometría sale de funciones puras (`World/LiminalWorldLayout`) y se regenera en `OnConstruction`;
-un cambio de layout en C++ exige volver a generar el mapa (ver `docs/DECISIONES.md`, D-16 a D-18).
-
-`Liminal.SelfTest [Ciclos]` cruza cada puerta ida y vuelta con entrada simulada (Enhanced Input
-inyectado) y paso fijo de 1/60 s, y escribe `Saved/SelfTest.json`; `Liminal.Tour` guarda trece
-capturas en `Saved/Tour/` (hub y, por puerta, desde el hub, desde el bioma y desde dentro) y
-`Tools/Verify/check_tour.py` comprueba que no son negras, quemadas ni uniformes y que el hueco del
-portal muestra otra cosa que su marco; `make_lamina.py` compone `Saved/Tour/lamina.png`.
-
-| Medida (1280×720, paso fijo 1/60 s) | Resultado |
-|---|---|
-| Cruces por sentido (4 puertas × 20) | 80 hub → bioma y 80 bioma → hub, todos correctos |
-| Error máximo del módulo de la velocidad | 1,4e-14 % (tolerancia 1 %) |
-| Error máximo de dirección / posición | 1,2e-6° / 2e-9 cm |
-| Fotogramas con la cámara detrás de un portal o dentro de geometría | 0 de 9141 |
-| Control negativo (velocidad al 97 % tras el paso) | falla en las 4 puertas (3 %) |
-| Luminancia media de las capturas del Tour (0-255) | 110-185; recuadro central 171-232 (E3) |
-
-### Biomas procedurales (fase 4)
-
-Cada `ALiminalBiome` genera desde su semilla (`FRandomStream` → `LiminalTerrainMath::DeriveSeeds`) un
-terreno de 400 × 400 m a 2 m (`UProceduralMeshComponent` con colisión y color por vértice) y la
-dispersión con formas básicas del motor (un HISM por categoría, `MI_Scatter_*`), más niebla local en la
-selva y la Antártida. Son componentes transitorios: se regeneran en `OnConstruction` y en `BeginPlay`, no
-se guardan en el mapa (D-23). La puerta de vuelta y 30 m de camino de salida quedan llanos a ras del
-portal y sin dispersión. Detalle de parámetros en `docs/DECISIONES.md`, D-23 a D-27.
-
-| Bioma (semilla) | Relieve | Dispersión | Instancias |
-|---|---|---|---|
-| Selva (1001) | irregular, −5,5/+6,5 m | árboles (tronco + 1-2 copas), arbustos, sotobosque; niebla baja | 11 201 |
-| Desierto (1002) | dunas orientadas, hasta 8,1 m | rocas erosionadas (esferas y cubos aplastados), guijarros, matojos | 1539 |
-| Antártida (1003) | ondulación ±2,9 m y sastrugi | bloques y placas de hielo, montículos de nieve; neblina | 889 |
-| Cultivos (1004) | llano ±0,9 m con caballones | parcelas de color alterno, caminos, cercas, pacas, árboles aislados | 3318 |
-
-| Medida (1280×720) | Resultado |
-|---|---|
-| Generación de los cuatro biomas en `BeginPlay` | 0,36 s |
-| Calibración tras E4 (`LagFrames 0` / `1`) | 0,785 % / 16,6 % |
-| SelfTest tras E4 | 80 + 80 cruces correctos, 0 fotogramas con la cámara detrás de un portal |
-| Hueco frente al marco en las vistas de puerta (distancia RGB media) | 68-205 (umbral 20) |
-| Pared de vuelta vista desde el bioma (luminancia) | 212-220 (umbral 150, D-24) |
-
-### Medidas (fase 5 parcial)
-
-`Liminal.Bench` coloca la cámara en cinco poses fijas de `L_Hub` (0, 1, 2 y 4 portales visibles y la vista
-del caso de 4 con `Liminal.Portals.Enable 0`), comprueba en cada fotograma medido que el subsistema hace las
-capturas esperadas, calienta 120 fotogramas y mide 240 por caso: tiempo de GPU del fotograma
-(`FRHIGPUFrameTimeHistory`, la serie de `RHIGetGPUFrameCycles`), render thread y game thread. Escribe
-`Saved/Bench.json`; `Tools/verify.ps1 -Bench` lo lanza dos veces y compara el coste por portal (D-29).
-
-Equipo: NVIDIA GeForce RTX 4060 Laptop GPU, D3D12 (SM6), ventana de 1920 × 1080 (pantalla de 2560 × 1440),
-`r.VSync 0`, `t.MaxFPS 0`, TSR, Lumen GI y reflejos. Render target de las capturas: 1920 × 1080; la vista
-principal se renderiza al 73 % y TSR la escala.
-
-| Caso (ejecución 2) | Capturas por fotograma | GPU media / p50 / p95 (ms) | Render thread (ms) | Game thread (ms) |
-|---|---|---|---|---|
-| 0 portales | 0 | 10,84 / 10,57 / 12,23 | 11,29 | 1,44 |
-| 1 portal | 1 | 16,28 / 16,28 / 18,11 | 17,34 | 1,42 |
-| 2 portales | 2 | 24,38 / 24,35 / 26,61 | 25,91 | 1,47 |
-| 4 portales | 4 | 28,61 / 28,63 / 30,93 | 31,44 | 1,53 |
-| Vista de 4 con portales apagados | 0 | 10,89 / 10,60 / 12,44 | 11,54 | 1,34 |
-
-| Coste por portal a 1080p | Ejecución 1 | Ejecución 2 |
-|---|---|---|
-| GPU, (4 portales − apagados) / 4 | 4,37 ms | 4,43 ms (diferencia 1,4 %) |
-| GPU, pendiente sobre 0, 1, 2 y 4 | 4,42 ms | 4,49 ms (diferencia 1,7 %) |
-| Game thread, (4 − apagados) / 4 | 0,06 ms | 0,05 ms |
-
-El coste depende de lo que muestra cada portal: frente a la vista de 0 portales, el caso de 1 sale a 5,2-5,4
-ms y el de 2 (selva y Antártida) a 6,7-6,8 ms por portal, pero esas vistas también cambian lo que se ve del
-hub; el emparejado con los portales apagados es la cifra de referencia. El render thread coincide con el
-tiempo de fotograma porque la GPU es el cuello de botella (incluye la espera). Supera el objetivo provisional
-de 4 ms: con `Liminal.Portal.CaptureScale 0.73` (render target a la resolución interna de la vista principal)
-baja a 3,15-3,22 ms con la calibración en 0,81 % a 1080p, y los reflejos en pantalla no ahorran nada medible;
-ninguna palanca queda activada hasta revisar la imagen (D-30).
-
-Con el editor abierto, la compilación por línea de comandos falla por Live Coding: cerrarlo antes.
-La primera vez, clic derecho en `LiminalPortals.uproject` → *Generate Visual Studio project files*.
