@@ -52,8 +52,9 @@ B="C:/Program Files/Blender Foundation/Blender 5.2/blender.exe"
 ## Import en Unreal
 
 FBX en metros (`UnitScaleFactor = 100` en el fichero, lo mide `check_export.py`). El importador
-de UE 5.6 ignora la unidad: hay que importar con **`import_uniform_scale = 100`** y comprobar el
-bounding box (p. ej. `SM_Jungle_Tree_01` mide 16 m de alto, 1.600 uu). Material: `M_LowPoly`
+de UE 5.6 aplica esa unidad: se importa con **`import_uniform_scale = 1`** (con 100 salían 100 veces
+mayores) y `Tools/Content/import_art.py` comprueba el bounding box (p. ej. `SM_Jungle_Tree_01` mide
+16 m de alto, 1.600 uu). Material: `M_LowPoly`
 (color de vértice `Col` × `Tint`), sin importar materiales ni texturas del FBX. Normales
 importadas (flat), sin colisión del FBX: la de la vegetación la decide quien la disperse.
 

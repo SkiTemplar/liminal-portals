@@ -32,8 +32,9 @@ powershell -File Tools/Art/Blender/build_kits.ps1 -Kits hub  # un kit (hub, retu
 
 ## Import en Unreal
 
-Igual que los packs: FBX en metros (`UnitScaleFactor = 100`, lo mide `check_kits.py`), importar
-con **`import_uniform_scale = 100`**, normales importadas, sin materiales del FBX (asignar
-`M_LowPoly`), sin colisión del FBX. Comprobar el bounding box tras importar
-(`SM_Hub_DoorFrame_01`: 27 × 186 × 252 cm). El importador de Unreal pasa a mano izquierda
-invirtiendo Y: en Blender la flecha del cartel apunta a +Y; verificar tras importar hacia dónde queda.
+Lo hace `Tools/Content/import_art.py` (`Tools/content.ps1 -Mode Art`). FBX en metros
+(`UnitScaleFactor = 100`, lo mide `check_kits.py`): UE 5.6 aplica la unidad del FBX, así que se importa
+con **`import_uniform_scale = 1`** (con 100 salían 100 veces mayores), normales importadas, sin
+materiales del FBX (se asigna `M_LowPoly`) y sin colisión del FBX. El script compara el bounding box con
+`kits_report.json` (`SM_Hub_DoorFrame_01`: 27 × 186 × 252 cm). El importador pasa a mano izquierda
+invirtiendo Y: el tramo de cerca va hacia −Y y la flecha del cartel apunta a −Y local.

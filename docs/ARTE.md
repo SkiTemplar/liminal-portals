@@ -17,9 +17,10 @@ liminal sale del orden excesivo, de la limpieza y de la luz, no del detalle.
 
 ## Convenciones de malla
 
-- Unidades: centímetros en Unreal. El importador de UE 5.6 ignora la unidad del FBX: exportar en
-  metros con escala de escena 1 e importar con `import_uniform_scale = 100` (papercut de Explored), o
-  exportar ya en centímetros; comprobarlo midiendo el bounding box tras importar.
+- Unidades: centímetros en Unreal. Los FBX salen en metros (`UnitScaleFactor = 100`) y el importador
+  de UE 5.6 **sí** aplica esa unidad: se importa con `import_uniform_scale = 1` (con 100, como en
+  Explored, las mallas salían 100 veces mayores; medido el 2026-10-25, D-33). `Tools/Content/import_art.py`
+  compara el bounding box importado con los informes de `Art/Export` (±2 %) y falla si no casa.
 - Pivote en el centro de la base (z mínima = 0), +X hacia delante, Z arriba.
 - Flat shading: normales por cara (sin suavizado) salvo en copas de árbol, donde se admiten normales
   suavizadas por grupo si quedan mejor.
@@ -49,6 +50,19 @@ bioma), con un zócalo teñido por el bioma (arena, nieve, musgo o barro).
   (`DoorFrameThickness`, `FrameThickness` en `ALiminalPortal`), placa trasera a 60 cm detrás del plano.
 - Hub: pasillo de 16 × 6 × 3,2 m, paredes de 20 cm (`ALiminalHub`).
 - El marco nuevo no puede invadir el hueco: el cruce y la cápsula (radio ~34 cm) dependen de él.
+
+## Integración en Unreal
+
+- `powershell -File Tools/content.ps1 -Mode Art` importa los FBX de `Art/Export/<Kit>/` en `/Game/Art/<Kit>/`
+  con `M_LowPoly` y sus instancias (`MI_LowPoly`, `_Foliage` de dos caras, `_Ice`, `_LightPanel`,
+  `_ExitSign`). Solo reimporta los FBX que cambian (clave sha256 en los metadatos del asset).
+- `M_LowPoly`: `BaseColor = Tint × Col.rgb^2,2` (Unreal guarda el color del FBX, que Blender exporta en
+  sRGB, sin convertir), `Emissive = Emissive × Col.rgb^2,2 × (1 − Col.a)`.
+- Colisión simple: cápsula en el tronco de los árboles, caja en rocas, troncos caídos, bloques de hielo,
+  icebergs y granero, tres cajas en el arco; nada en follaje, flores, cultivos ni atrezo del hub. Los
+  marcos y las paredes exentas colisionan con las cajas del blockout, ocultas (D-32).
+- Qué malla usa cada categoría de la dispersión, cada pieza del hub y cada pared de vuelta está en
+  `Source/LiminalPortals/World/LiminalArtCatalog.cpp` (tabla editable; D-34).
 
 ## Verificación
 
