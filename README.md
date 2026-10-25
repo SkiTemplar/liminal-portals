@@ -30,7 +30,7 @@ separados porque ocupan sitios distintos.
 - Malla plana del marco y la superficie, y una referencia al portal emparejado (`LinkedPortal`).
 - `USceneCaptureComponent2D` y un `UTextureRenderTarget2D` a la resolución del viewport.
 - Cada fotograma, la cámara de captura se coloca en la transformación de la cámara del jugador
-  llevada a través del par de portales: `T_capture = T_linked · T_portal⁻¹ · T_camera`. Usa el
+  llevada a través del par de portales: `T_capture = T_linked · Yaw180 · T_portal⁻¹ · T_camera` (el giro de 180° hace que entrar por la cara frontal de A salga por la frontal de B; ver `LiminalPortalMath`). Usa el
   mismo FOV que la cámara del jugador.
 - Activar el clip plane de la captura en el plano del portal de destino; si no, se ve lo que hay
   entre la cámara de captura y el portal. Requiere *Support Global Clip Plane for Planar
@@ -46,7 +46,7 @@ separados porque ocupan sitios distintos.
 
 - El cruce se detecta cuando el signo de `dot(CameraPos − PortalPos, PortalNormal)` cambia con el
   punto dentro de los límites del portal. Se mide sobre la cámara, no sobre la cápsula.
-- Al cruzar se aplica `T_linked · T_portal⁻¹` a la posición, rotación y velocidad del pawn.
+- Al cruzar se aplica `T_linked · Yaw180 · T_portal⁻¹` a la posición, rotación y velocidad del pawn.
   Así se mantiene el movimiento sin saltos.
 - Mientras la cámara está a menos de la distancia del plano cercano, se da grosor a la superficie
   del portal (o se renderiza como caja). Así se evita el parpadeo del plano cercano.
