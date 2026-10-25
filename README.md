@@ -65,7 +65,9 @@ La matemática va en funciones puras sin `UWorld`, con su Automation Test:
   superficie del portal.
 - Exposición fija (Manual) o la misma en el viewport y en las capturas.
 - En cada captura: GI y reflejos con Lumen, `SceneCaptureResolutionScale = 1` y *Always Persist
-  Rendering State* si se captura con `CaptureScene()`.
+  Rendering State* si se captura con `CaptureScene()`. UE 5.6 desactiva Lumen en las capturas salvo
+  que la captura lo sobrescriba en sus *Post Process Settings*; `ALiminalPortal` copia el método del
+  proyecto en cada captura (ver `docs/DECISIONES.md`, D-10).
 - Revisar el antialiasing: TSR en la captura no tiene histórico propio y puede verse distinta
   del viewport.
 
@@ -112,7 +114,27 @@ Portales colocados por el jugador, multijugador, objetos que atraviesan el porta
 powershell -File Tools/build.ps1                  # editor (Development)
 powershell -File Tools/build.ps1 -Target Game     # juego
 powershell -File Tools/test.ps1                   # Automation Tests sin interfaz
+powershell -File Tools/content.ps1                # materiales y mapas por script (Tools/Content)
+powershell -File Tools/verify.ps1 -Calibrate      # calibración del portal con RHI (fase 1)
 ```
+
+### Calibración del portal (fase 1)
+
+`/Game/Maps/L_Calibration` tiene un portal A y su pareja B en el mismo sitio mirando a lados
+opuestos, así que el paso es la identidad y lo que se ve por el portal debe coincidir con lo que se
+vería sin él. `Liminal.Calibrate` gira la cámara 10° por fotograma delante del portal en dos pasadas
+idénticas (superficie visible y oculta) y guarda las capturas y la máscara del portal;
+`Tools/verify.ps1 -Calibrate` lo lanza con `Liminal.Portal.LagFrames 0` y `1` y compara dentro de la
+máscara (`Tools/Verify/compare_calibration.py`, resultado en `Saved/Calibration/result.json`).
+
+| Medida (1280×720, TSR, Lumen) | Diferencia media en la máscara |
+|---|---|
+| `LagFrames 0` (orden de fotograma correcto) | 0,75-0,81 % |
+| `LagFrames 1` (control: pose del fotograma anterior) | 16,6 % (ratio > 20) |
+| Clip plane invertido (`-ClipPlaneCheck`) | 47,4 % |
+
+Aceptación: < 2 % sin retraso y > 3 veces ese valor con retraso. FXAA y TAA dan lo mismo que TSR;
+el residuo es de Lumen (con Lumen apagado, 0,26 %).
 
 Con el editor abierto, la compilación por línea de comandos falla por Live Coding: cerrarlo antes.
 La primera vez, clic derecho en `LiminalPortals.uproject` → *Generate Visual Studio project files*.

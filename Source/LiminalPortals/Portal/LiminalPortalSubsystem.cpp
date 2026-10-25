@@ -79,6 +79,7 @@ void ULiminalPortalSubsystem::UpdatePortals(APlayerController* PlayerController,
 
 	CaptureVisiblePortals(PlayerController, FinalView);
 	PushViewHistory(FinalView);
+	OnPortalsUpdated.Broadcast(FinalView);
 }
 
 bool ULiminalPortalSubsystem::ProcessCrossings(APlayerController* PlayerController, const FVector& CameraLocation)
@@ -97,7 +98,7 @@ bool ULiminalPortalSubsystem::ProcessCrossings(APlayerController* PlayerControll
 	for (const TWeakObjectPtr<ALiminalPortal>& Entry : Portals)
 	{
 		ALiminalPortal* Portal = Entry.Get();
-		if (!Portal || !Portal->LinkedPortal)
+		if (!Portal || !Portal->LinkedPortal || Portal->bExitOnly)
 		{
 			continue;
 		}
@@ -177,7 +178,7 @@ void ULiminalPortalSubsystem::CaptureVisiblePortals(APlayerController* PlayerCon
 		}
 		Portal->UpdateSurfaceDepth(View.Location);
 
-		if (!Portal->LinkedPortal)
+		if (!Portal->LinkedPortal || Portal->bExitOnly)
 		{
 			continue;
 		}
@@ -188,9 +189,11 @@ void ULiminalPortalSubsystem::CaptureVisiblePortals(APlayerController* PlayerCon
 			continue;
 		}
 
-		// El reserva del destino taparía la vista desde su propio plano.
+		// El reserva del destino taparía la vista desde su propio plano. El del origen solo entra en
+		// su propia captura si el origen es visible desde el destino (en calibración coinciden).
 		HiddenComponents.SetNum(NumSurfaces);
 		HiddenComponents.Add(Portal->LinkedPortal->GetFallbackComponent());
+		HiddenComponents.Add(Portal->GetFallbackComponent());
 		if (Portal->CaptureView(CaptureSourceView, TargetSize, HiddenComponents))
 		{
 			++LastCaptureCount;

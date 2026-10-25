@@ -10,6 +10,7 @@ class ALiminalPortal;
 class APlayerController;
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLiminalPortalTeleport, ALiminalPortal* /*Source*/, ALiminalPortal* /*Target*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnLiminalPortalsUpdated, const FMinimalViewInfo& /*FinalView*/);
 
 /**
  * Registro de portales del mundo y orden de fotograma (decisión 4): lo llama
@@ -51,6 +52,12 @@ public:
 
 	/** Se emite tras cada teletransporte por portal. */
 	FOnLiminalPortalTeleport OnPortalTeleport;
+
+	/**
+	 * Se emite al final de UpdatePortals con la vista final del fotograma (la que renderiza el
+	 * viewport), después de las capturas. Lo usa Liminal.Calibrate para pedir la captura de pantalla.
+	 */
+	FOnLiminalPortalsUpdated OnPortalsUpdated;
 
 protected:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;

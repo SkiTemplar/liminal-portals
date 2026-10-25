@@ -61,10 +61,77 @@ namespace LiminalPortalWorldTests
 
 using namespace LiminalPortalWorldTests;
 
+namespace LiminalPortalWorldTests
+{
+	UPrimitiveComponent* FindPrimitive(const AActor* Actor, FName Name)
+	{
+		TInlineComponentArray<UPrimitiveComponent*> Components(Actor);
+		for (UPrimitiveComponent* Component : Components)
+		{
+			if (Component->GetFName() == Name)
+			{
+				return Component;
+			}
+		}
+		return nullptr;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalCalibrationFlagsTest, "LiminalPortals.World.Portal.CalibrationFlags", TestFlags)
+bool FLiminalPortalCalibrationFlagsTest::RunTest(const FString& Parameters)
+{
+	AddExpectedMessage(TEXT("Material de"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, -1);
+	// El portal empotrado del caso negativo no tiene enlace a propósito.
+	AddExpectedMessage(TEXT("no tiene LinkedPortal"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+
+	FScopedGameWorld Scope;
+	UTEST_NOT_NULL(TEXT("Mundo"), Scope.World);
+
+	// Pareja de calibración: A y B coincidentes mirando a lados opuestos, sin empotrar; B solo de salida.
+	ALiminalPortal* PortalA = Scope.Spawn<ALiminalPortal>(FTransform(FRotator::ZeroRotator, FVector::ZeroVector));
+	ALiminalPortal* PortalB = Scope.Spawn<ALiminalPortal>(FTransform(FRotator(0.0, 180.0, 0.0), FVector::ZeroVector));
+	ALiminalPortal* Embedded = Scope.Spawn<ALiminalPortal>(FTransform(FRotator::ZeroRotator, FVector(0.0, 5000.0, 0.0)));
+	UTEST_NOT_NULL(TEXT("Portal A"), PortalA);
+	UTEST_NOT_NULL(TEXT("Portal B"), PortalB);
+	UTEST_NOT_NULL(TEXT("Portal empotrado"), Embedded);
+	PortalA->bEmbedded = false;
+	PortalB->bEmbedded = false;
+	PortalB->bExitOnly = true;
+	PortalA->LinkedPortal = PortalB;
+	PortalB->LinkedPortal = PortalA;
+	PortalA->DispatchBeginPlay();
+	PortalB->DispatchBeginPlay();
+	Embedded->DispatchBeginPlay();
+
+	TestTrue(TEXT("Paso A→B = identidad"), PortalA->GetTransferToLinked().Equals(FTransform::Identity, 1e-6));
+
+	const UPrimitiveComponent* PlateA = FindPrimitive(PortalA, TEXT("BackPlate"));
+	UTEST_NOT_NULL(TEXT("Placa de A"), PlateA);
+	TestFalse(TEXT("Sin empotrar no hay placa visible"), PlateA->IsVisible());
+	TestEqual(TEXT("Sin empotrar la placa no colisiona"), PlateA->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+
+	TestTrue(TEXT("La superficie de B (solo salida) está oculta"), PortalB->GetSurfaceComponent()->bHiddenInGame != 0);
+	PortalB->SetSurfaceHiddenInGame(false);
+	TestTrue(TEXT("Solo salida: sigue oculta aunque se pida mostrarla"), PortalB->GetSurfaceComponent()->bHiddenInGame != 0);
+
+	TestFalse(TEXT("La superficie de A se ve"), PortalA->GetSurfaceComponent()->bHiddenInGame != 0);
+	PortalA->SetSurfaceHiddenInGame(true);
+	TestTrue(TEXT("A se oculta a petición"), PortalA->GetSurfaceComponent()->bHiddenInGame != 0);
+	PortalA->SetSurfaceHiddenInGame(false);
+	TestFalse(TEXT("A se vuelve a mostrar"), PortalA->GetSurfaceComponent()->bHiddenInGame != 0);
+
+	// Negativo: el portal empotrado por defecto conserva la placa sólida.
+	const UPrimitiveComponent* PlateEmbedded = FindPrimitive(Embedded, TEXT("BackPlate"));
+	UTEST_NOT_NULL(TEXT("Placa del empotrado"), PlateEmbedded);
+	TestTrue(TEXT("Empotrado: placa visible"), PlateEmbedded->IsVisible());
+	TestEqual(TEXT("Empotrado: placa sólida"), PlateEmbedded->GetCollisionEnabled(), ECollisionEnabled::QueryAndPhysics);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPortalActorTest, "LiminalPortals.World.Portal.RegisterLinkAndLayout", TestFlags)
 bool FLiminalPortalActorTest::RunTest(const FString& Parameters)
 {
-	// Antes de E2 los materiales no existen: el portal avisa y sigue (no debe romper).
+	// Si los materiales de Content/ no existen, el portal avisa y sigue (no debe romper).
 	AddExpectedMessage(TEXT("Material de"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, -1);
 
 	FScopedGameWorld Scope;

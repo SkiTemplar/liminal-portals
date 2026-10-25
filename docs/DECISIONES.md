@@ -102,3 +102,103 @@ Las que surjan durante la implementación se añaden aquí con este formato:
 - **Alternativas**: test de frustum exacto por planos; oclusión por consultas de GPU (E5).
 - **Motivo**: conservador: capturar de más antes que congelar un portal visible.
 - **Cómo revertir**: `Config/DefaultEngine.ini`; `ClipPlaneOffset` en `ALiminalPortal`.
+
+### D-09 · Pareja de calibración: portales sin empotrar y solo de salida
+
+- **Contexto**: en `L_Calibration` A y B coinciden (paso = identidad). Con la decisión 3 la placa
+  trasera de B queda 60 cm delante de A y tapa la vista; la superficie de B (de espaldas a la
+  cámara, sin captura) se pinta delante de la de A; y el reserva de A (visible solo en capturas)
+  queda dentro de la propia captura de A.
+- **Elegida**: dos propiedades de `ALiminalPortal`: `bEmbedded` (por defecto `true`; si es `false`,
+  marco en aro de ±5 cm y placa oculta y sin colisión) y `bExitOnly` (sin superficie visible, sin
+  captura y sin cruce desde él). Además, cada captura oculta el reserva del origen además del
+  del destino.
+- **Alternativas**: separar A y B unos centímetros (el paso deja de ser la identidad y la
+  comparación ya no es píxel a píxel); ocultar componentes desde el script de contenido (frágil,
+  depende de nombres de subobjetos).
+- **Motivo**: lo mínimo para que la pareja coincidente funcione sin tocar el caso normal. Ocultar
+  el reserva del origen solo cambia algo si el origen es visible desde el destino; en ese caso se
+  ve la placa trasera en lugar del color plano.
+- **Cómo revertir**: `bEmbedded`, `bExitOnly` y `SetSurfaceHiddenInGame` en
+  `Portal/LiminalPortal.*`; `HiddenComponents.Add(Portal->GetFallbackComponent())` en
+  `ULiminalPortalSubsystem::CaptureVisiblePortals`.
+
+### D-10 · Lumen activado explícitamente en las capturas
+
+- **Contexto**: la primera calibración dio 8,6 % de diferencia media en la máscara: las caras en
+  sombra salían casi negras en el portal. `SceneCaptureRendering.cpp` (UE 5.6) fuerza
+  `DynamicGlobalIlluminationMethod` y `ReflectionMethod` a `None` en las capturas salvo que la
+  propia captura los sobrescriba, y baja la caché de superficies a 0,5. Comprobado: con
+  `r.Lumen.DiffuseIndirect.Allow 0` la vista principal y el portal coinciden píxel a píxel.
+- **Elegida**: en cada `CaptureView`, la captura copia `r.DynamicGlobalIlluminationMethod` y
+  `r.ReflectionMethod` del proyecto (override en sus `PostProcessSettings`) y fija
+  `LumenSurfaceCacheResolution = 1`. Resultado: 0,75-0,81 % (antes 8,6 %).
+- **Alternativas**: `bMainViewCamera` + `bInheritMainViewCameraPostProcessSettings` (exige
+  `CaptureSceneDeferred` y cambia el orden de fotograma de la decisión 4); quitar Lumen del proyecto
+  (0,26 %, pero contradice la decisión 8).
+- **Motivo**: el portal debe verse con la misma iluminación que el viewport; es el ajuste que
+  pide el propio motor.
+- **Cómo revertir**: `MatchProjectLighting` en `Portal/LiminalPortal.cpp`.
+
+### D-11 · Sentido del clip plane comprobado en ejecución
+
+- **Contexto**: había que confirmar que `USceneCaptureComponent2D` conserva el semiespacio hacia
+  el que apunta `ClipPlaneNormal` (el motor monta `FPlane(Base, Normal)` como `GlobalClippingPlane`).
+- **Elegida**: sin cambios en `LiminalPortalMath::ComputeClipPlane` ni en sus tests. Evidencia:
+  `Tools/verify.ps1 -Calibrate -ClipPlaneCheck` da 0,79 % con el sentido actual y 47,4 % con la
+  normal invertida (`Liminal.Portal.FlipClipPlane 1`: el portal muestra el cielo y negro).
+- **Alternativas**: ninguna; la CVar de diagnóstico se queda para repetir la comprobación.
+- **Cómo revertir**: no aplica.
+
+### D-12 · Antialiasing: se mantiene TSR
+
+- **Contexto**: README avisaba de que TSR en la captura no tiene histórico propio. Las capturas
+  `SCS_SceneColorHDR` no pasan por post-proceso (sin TSR ni jitter); la vista principal aplica TSR
+  una vez sobre la superficie.
+- **Elegida**: TSR (`r.AntiAliasingMethod 4`, el valor por defecto). Medido en `L_Calibration`
+  (32 fotogramas, giros de 10°): TSR 0,75-0,81 %, FXAA 0,71 %, TAA 0,69 %; con `LagFrames 1`,
+  16,4-16,6 % en los tres. La diferencia residual es de Lumen (con Lumen apagado baja a 0,26 %),
+  no del antialiasing.
+- **Alternativas**: FXAA o TAA (mejora inapreciable para la aceptación y peor imagen).
+- **Motivo**: TSR cumple con margen (< 2 % y ratio > 20).
+- **Cómo revertir**: `r.AntiAliasingMethod` en `Config/DefaultEngine.ini`.
+
+### D-13 · Calibración sin niebla y riesgo de doble niebla en los biomas
+
+- **Contexto**: la niebla exponencial, la `ALocalFogVolume` y la perspectiva aérea de
+  `SkyAtmosphere` se aplican a los píxeles opacos según su profundidad. La superficie del portal es
+  opaca: recibe niebla por el tramo cámara-portal además de la que ya trae la captura.
+- **Elegida**: `L_Calibration` no tiene niebla (perspectiva aérea a partir de 100 m, fuera de la
+  sala). El riesgo queda abierto para E3/E4, donde los biomas usan niebla local.
+- **Alternativas para E3/E4**: niebla solo en el lado del bioma lejos de la puerta; superficie
+  translúcida sin niebla (cambia el orden de render y el TSR); medirlo con una variante de la
+  calibración con niebla.
+- **Motivo**: medir primero el caso limpio; la niebla es un experimento aparte.
+- **Cómo revertir**: no aplica (no hay código).
+
+### D-14 · Lumen ve la superficie del portal en sus trazas de pantalla
+
+- **Contexto**: fuera de la máscara, la pasada visible y la oculta difieren 1,8 niveles de media;
+  lo más visible es el suelo en sombra justo delante del portal, más claro con la superficie
+  visible. Las trazas de pantalla de Lumen leen el color de escena: la superficie emite la imagen
+  del destino como si estuviera en el plano.
+- **Elegida**: se acepta; no entra en la aceptación de E2 y, en un portal de verdad, que la luz
+  del destino ilumine el lado de origen es razonable.
+- **Alternativas**: `r.Lumen.ScreenProbeGather.ScreenTraces 0` (no resuelve la diferencia de
+  dentro de la máscara: 7,8 % sin el arreglo de D-10) o excluir la superficie de las trazas.
+- **Motivo**: conservador: sin cambios hasta medirlo en el hub (E3/E5).
+- **Cómo revertir**: no aplica.
+
+### D-15 · Procedimiento de calibración
+
+- **Contexto**: el plan fija la secuencia pero no el formato de salida ni la métrica exacta.
+- **Elegida**: `Liminal.Calibrate [Etiqueta]` escribe en `Saved/Calibration[/Etiqueta]/`
+  `{visible,hidden}/NNN.png` y `calibration.json` (esquinas del portal en píxeles por fotograma,
+  CVars vigentes y contraste con `ProjectWorldLocationToScreen`, error máximo 1e-4 px). Barrido de
+  yaw en onda triangular ±20° con paso de 10° (32 fotogramas por pasada), 45 fotogramas quietos
+  antes de cada pasada y entrada del jugador bloqueada. `compare_calibration.py` rasteriza la
+  máscara, la erosiona 3 px y promedia |visible − oculta| en RGB dentro de ella; escribe `mask/` y
+  `diff/` (×8) para revisión visual. `verify.ps1` usa las etiquetas `lag0`, `lag1` y `flipclip`.
+- **Alternativas**: máscara renderizada (tercera pasada con material plano); métrica en luminancia.
+- **Motivo**: la máscara geométrica no depende del render que se mide y el polígono es comprobable.
+- **Cómo revertir**: `Debug/LiminalCalibration.*`, `Tools/Verify/compare_calibration.py`.

@@ -7,6 +7,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "LiminalPortals.h"
 #include "LiminalPortalsSettings.h"
@@ -26,6 +27,12 @@ namespace
 	constexpr double BackPlateThickness = 10.0;
 	/** Separación mínima entre la caja de superficie extendida y la placa trasera, en cm. */
 	constexpr float SurfaceToPlateMargin = 5.f;
+
+	TAutoConsoleVariable<int32> CVarFlipClipPlane(
+		TEXT("Liminal.Portal.FlipClipPlane"),
+		0,
+		TEXT("Diagnóstico de calibración: invierte la normal del clip plane de las capturas (1 = invertida)."),
+		ECVF_Default);
 
 	void PlaceBox(UStaticMeshComponent* Component, const FVector& Center, const FVector& Size)
 	{
@@ -54,6 +61,30 @@ namespace
 		Component->bAffectDistanceFieldLighting = false;
 		Component->bReceivesDecals = false;
 		Component->SetGenerateOverlapEvents(false);
+	}
+
+	/**
+	 * Las capturas desactivan Lumen por defecto (SceneCaptureRendering.cpp fuerza GI y reflejos a
+	 * None salvo que la propia captura los sobrescriba): sin esto, la imagen del portal sale sin luz
+	 * indirecta ni luz de cielo. Se copian los métodos del proyecto en cada captura para seguir los
+	 * cambios en caliente de r.DynamicGlobalIlluminationMethod y r.ReflectionMethod.
+	 */
+	void MatchProjectLighting(FPostProcessSettings& Settings)
+	{
+		static const TConsoleVariableData<int32>* GIMethod =
+			IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DynamicGlobalIlluminationMethod"));
+		static const TConsoleVariableData<int32>* ReflectionMethod =
+			IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.ReflectionMethod"));
+
+		Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+		Settings.DynamicGlobalIlluminationMethod = static_cast<EDynamicGlobalIlluminationMethod::Type>(
+			GIMethod ? GIMethod->GetValueOnGameThread() : EDynamicGlobalIlluminationMethod::Lumen);
+		Settings.bOverride_ReflectionMethod = true;
+		Settings.ReflectionMethod = static_cast<EReflectionMethod::Type>(
+			ReflectionMethod ? ReflectionMethod->GetValueOnGameThread() : EReflectionMethod::Lumen);
+		// La caché de superficies de la captura va por defecto a media resolución; la vista principal, a 1.
+		Settings.bOverride_LumenSurfaceCacheResolution = true;
+		Settings.LumenSurfaceCacheResolution = 1.f;
 	}
 
 	UMaterialInterface* LoadOptionalMaterial(const TSoftObjectPtr<UMaterialInterface>& Path, const TCHAR* Label)
@@ -151,6 +182,7 @@ void ALiminalPortal::BeginPlay()
 	Super::BeginPlay();
 	ApplyLayout();
 	ApplyMaterials();
+	SetSurfaceHiddenInGame(false);
 
 	if (!LinkedPortal)
 	{
@@ -180,10 +212,12 @@ void ALiminalPortal::ApplyLayout()
 	const double Width = PortalSize.X;
 	const double Height = PortalSize.Y;
 	const double Frame = FrameThickness;
-	const double JambDepth = BackPlateDistance + FrameFrontOverhang;
-	const double JambCenterX = (FrameFrontOverhang - BackPlateDistance) * 0.5;
+	// Empotrado, los montantes cierran los lados hasta la placa trasera: no se puede entrar por
+	// detrás del plano. Sin empotrar, el marco es un aro simétrico respecto al plano.
+	const double JambBack = bEmbedded ? BackPlateDistance : FrameFrontOverhang;
+	const double JambDepth = JambBack + FrameFrontOverhang;
+	const double JambCenterX = (FrameFrontOverhang - JambBack) * 0.5;
 
-	// Los montantes cierran los lados hasta la placa trasera: no se puede entrar por detrás del plano.
 	const FVector JambSize(JambDepth, Frame, Height + Frame);
 	const double JambY = Width * 0.5 + Frame * 0.5;
 	PlaceBox(FrameLeft, FVector(JambCenterX, -JambY, (Height + Frame) * 0.5), JambSize);
@@ -192,6 +226,8 @@ void ALiminalPortal::ApplyLayout()
 
 	PlaceBox(BackPlate, FVector(-(BackPlateDistance + BackPlateThickness * 0.5), 0.0, (Height + Frame) * 0.5),
 		FVector(BackPlateThickness, Width + 2.0 * Frame, Height + Frame));
+	BackPlate->SetVisibility(bEmbedded);
+	BackPlate->SetCollisionEnabled(bEmbedded ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 
 	// El reserva queda medio centímetro detrás del plano para no competir con la superficie.
 	PlaceBox(Fallback, FVector(-0.5, 0.0, Height * 0.5), FVector(0.1, Width, Height));
@@ -211,6 +247,11 @@ void ALiminalPortal::SetSurfaceDepth(float Depth)
 	CurrentSurfaceDepth = SafeDepth;
 	// La cara frontal de la caja queda siempre sobre el plano (X = 0); crece hacia detrás.
 	PlaceBox(Surface, FVector(-SafeDepth * 0.5, 0.0, PortalSize.Y * 0.5), FVector(SafeDepth, PortalSize.X, PortalSize.Y));
+}
+
+void ALiminalPortal::SetSurfaceHiddenInGame(bool bHideSurface)
+{
+	Surface->SetHiddenInGame(bHideSurface || bExitOnly);
 }
 
 void ALiminalPortal::UpdateSurfaceDepth(const FVector& CameraLocation)
@@ -283,11 +324,13 @@ bool ALiminalPortal::CaptureView(const FMinimalViewInfo& View, const FIntPoint& 
 		FTransform(View.Rotation.Quaternion(), View.Location));
 	Capture->SetWorldLocationAndRotation(CapturePose.GetLocation(), CapturePose.GetRotation());
 	Capture->FOVAngle = View.FOV;
+	MatchProjectLighting(Capture->PostProcessSettings);
 
 	const LiminalPortalMath::FClipPlane ClipPlane =
 		LiminalPortalMath::ComputeClipPlane(LinkedPortal->GetPlaneTransform(), ClipPlaneOffset);
+	const bool bFlipClipPlane = CVarFlipClipPlane.GetValueOnGameThread() != 0;
 	Capture->ClipPlaneBase = ClipPlane.Base;
-	Capture->ClipPlaneNormal = ClipPlane.Normal;
+	Capture->ClipPlaneNormal = bFlipClipPlane ? -ClipPlane.Normal : ClipPlane.Normal;
 
 	Capture->ClearHiddenComponents();
 	for (UPrimitiveComponent* Component : HiddenComponents)

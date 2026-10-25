@@ -55,6 +55,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Frame", meta = (ClampMin = "1.0"))
 	float FrameThickness = 12.f;
 
+	/**
+	 * Portal empotrado (decisión 3): marco en túnel hasta la placa trasera sólida. Desactivado, el
+	 * marco es un aro fino centrado en el plano y no hay placa; lo usa la calibración, donde A y B
+	 * coinciden y la placa de cada uno taparía la cara frontal del otro.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Frame")
+	bool bEmbedded = true;
+
+	/**
+	 * Solo de salida: sin superficie visible, sin captura y sin cruce desde él; recibe a quien entra
+	 * por el portal que lo enlaza. Lo usa la calibración (B coincide con A y su superficie taparía la de A).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal")
+	bool bExitOnly = false;
+
 	/** Desplazamiento del clip plane respecto al plano del destino (negativo = detrás), en cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Capture")
 	float ClipPlaneOffset = -1.f;
@@ -81,13 +96,20 @@ public:
 	UPrimitiveComponent* GetSurfaceComponent() const;
 	UPrimitiveComponent* GetFallbackComponent() const;
 
+	/**
+	 * Oculta o muestra la superficie en la vista del jugador (las capturas ya la ocultan siempre).
+	 * Un portal bExitOnly la mantiene oculta.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Portal")
+	void SetSurfaceHiddenInGame(bool bHideSurface);
+
 	/** Ajusta la profundidad de la caja de superficie según la posición de la cámara. */
 	void UpdateSurfaceDepth(const FVector& CameraLocation);
 
 	/**
 	 * Coloca la captura en la vista llevada a través del par de portales y la renderiza en el
 	 * momento. Crea o redimensiona el render target a RenderTargetSize.
-	 * @param HiddenComponents Superficies de todos los portales y reserva del destino.
+	 * @param HiddenComponents Superficies de todos los portales y reservas del origen y del destino.
 	 * @return false si no hay enlace o tamaño válido y no se capturó.
 	 */
 	bool CaptureView(const FMinimalViewInfo& View, const FIntPoint& RenderTargetSize,

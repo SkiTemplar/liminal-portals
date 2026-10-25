@@ -17,9 +17,10 @@ public class LiminalPortals : ModuleRules
 		});
 
 		// ProceduralMeshComponent lo usa el terreno de los biomas (E4); se declara ya para fijar el plugin.
+		// Json e ImageCore: informe y capturas PNG de Liminal.Calibrate (Debug/).
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"ProceduralMeshComponent"
+			"ProceduralMeshComponent", "Json", "ImageCore"
 		});
 	}
 }
