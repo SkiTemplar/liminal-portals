@@ -136,13 +136,14 @@ Source/LiminalPortals/
   Debug/LiminalSelfTest*.*               Liminal.SelfTest y sus comprobaciones puras
   Debug/LiminalTour.*                    Liminal.Tour
   Debug/LiminalBench*.*                  Liminal.Bench, estadísticos y poses fijas
+  Debug/LiminalBenchWalk.*, LiminalBenchCrossing.*, LiminalGpuProfile.*   modo perfil de Liminal.Bench: recorrido, cruces y desglose de GPU por pase (D-36)
   Debug/LiminalDebugWorld.*, LiminalDebugShared.h   utilidades comunes de las ejecuciones de depuración
-  Tests/*.cpp                            Automation Tests (58)
+  Tests/*.cpp                            Automation Tests (61)
 Tools/
   build.ps1, test.ps1, content.ps1, verify.ps1, common.ps1
   Content/build_content.py, content_utils.py   materiales y mapas creados por script
   Content/import_art.py                  importación del arte de Art/Export a /Game/Art
-  Verify/compare_calibration.py, check_tour.py, make_lamina.py (+ tests de Python)
+  Verify/compare_calibration.py, check_tour.py, make_lamina.py, summarize_profile.py (+ tests de Python)
 ```
 
 ## Controles
@@ -203,10 +204,11 @@ informes de ejecuciones anteriores.
 | `-SelfTest -SelfTestNegative` | Añade el control negativo `Liminal.Portal.DebugVelocityScale 0.97` | La prueba tiene que fallar en las cuatro puertas |
 | `-Tour` | `L_Hub` con `Liminal.Tour`: 13 capturas (hub y, por puerta, desde el hub, desde el bioma y desde dentro) en `Saved/Tour/` | `check_tour.py`: luminancia media entre 15 y 245, desviación > 6, hueco del portal distinto del marco (> 20) y con detalle (> 4), pared de vuelta iluminada (≥ 150) y primer plano no negro (≤ 25 % de píxeles < 20). `Saved/Tour/result.json` y `lamina.png` |
 | `-Bench` | `L_Hub` a 1920 × 1080 en ventana, `r.VSync 0`, `t.MaxFPS 0`, dos ejecuciones de `Liminal.Bench` | Tiempo de GPU, render thread y game thread en cinco poses fijas (0, 1, 2, 4 portales y 4 apagados), 120 fotogramas de calentamiento y 240 medidos; falla si algún caso no tiene las capturas esperadas y avisa si el coste por portal difiere un 25 % o más. `Saved/Bench_run{1,2}.json`, `Saved/BenchResult.json` |
+| `-Bench -Profile` | Lo mismo con `Liminal.Bench … profile` (D-36) y, tras los casos, un recorrido de 216 poses por el hub | Desglose de GPU por pase y por cola de cada caso, con la vista principal separada de cada captura (`Tools/Verify/summarize_profile.py` lo agrupa en Lumen, sombras, base pass, TSR…), CPU (game, render y RHI thread) y, en el recorrido, capturas por fotograma, superficies dibujadas en la vista principal y área en pantalla de cada portal capturado. `Saved/BenchProfile_run<N>.json`, `Saved/BenchProfileSummary.json` |
 
 Parámetros comunes: `-ExecCmds '...'` (órdenes de consola previas), `-ResX`/`-ResY` (1280 × 720),
 `-TimeoutMinutes` (45); de `-Bench`: `-BenchResX`/`-BenchResY`, `-BenchFrames`, `-BenchWarmup` y
-`-BenchMaxRelativeDiff`.
+`-BenchMaxRelativeDiff` y `-BenchRuns` (2; con 1 no se comprueba la estabilidad).
 
 ### CVars de experimento y diagnóstico
 
@@ -219,6 +221,9 @@ Parámetros comunes: `-ExecCmds '...'` (órdenes de consola previas), `-ResX`/`-
 | `Liminal.Portal.CaptureScale` | Escala del render target (0 = la de `ULiminalPortalsSettings::RenderTargetScale`) |
 | `Liminal.Portal.CaptureReflectionMethod` | Método de reflejos de las capturas (−1 = el del proyecto) |
 | `Liminal.Portal.ReleaseIdleSeconds`, `Liminal.Portal.ReleaseDistance` | Liberación del estado de render (10 s, 100 m; 0 s la desactiva) |
+| `Liminal.Portal.CaptureGIMethod` | Iluminación global de las capturas (−1 = la del proyecto, 0 = ninguna, 2 = en pantalla; D-36) |
+| `Liminal.Portal.CaptureShowFlags` | Show flags de las capturas, `Nombre=0+Nombre=1` (con `+`: `-ExecCmds` parte por comas; D-36) |
+| `Liminal.Scatter.CullScale` | Escala de las distancias de corte de la dispersión (1; las categorías sin corte no cambian; D-36) |
 
 ## Medidas
 
@@ -312,6 +317,50 @@ Palancas medidas en E5 y no activadas (D-30): `Liminal.Portal.CaptureScale 0.73`
 resolución interna de la vista principal, 1402 × 788) baja el coste a 3,15-3,22 ms con la calibración en
 0,81 % a 1080p; los reflejos en pantalla en las capturas (`CaptureReflectionMethod 2`) no ahorran nada
 medible (4,18-4,37 ms).
+
+### Desglose por pase y palancas (D-36)
+
+`verify.ps1 -Bench -Profile` (método en D-36). Desglose aditivo con `r.RDG.AsyncCompute 0`, ms de GPU por
+fotograma; captura = media de las cuatro del caso de 4 (la de la selva, sola, llega a 7,6 ms).
+
+| Pase | Vista principal (0 portales) | Una captura |
+|---|---|---|
+| Lumen: screen probe gather / iluminación de la escena / reflejos / volumen de translucidez | 1,81 / 1,49 / 0,08 / 0,25 | 1,34 / 0,18 / 0,19 / 0,37 |
+| Sombras (VSM: asignación de páginas, profundidad, proyección) | 2,24 | 1,41 |
+| Luces diferidas | 0,95 | 0,23 |
+| Base pass + prepass | 0,33 | 0,38 |
+| Nanite / instancias, campos de distancia | 0 / 0 | 0 / 0,09 |
+| Niebla, cielo | 0 / 0,07 | 0,07 / 0,14 |
+| TSR + post-process | 3,02 + 0,29 | — |
+| Resto | 0,51 | 0,53 |
+| **Total** | **11,2** (GPU 11,3) | **5,1** |
+
+La captura no paga TSR ni post-process (3,3 ms), pero renderiza al 100 % (1920 × 1080 frente a los 1400 × 788
+de la principal) y repite lo que no depende de los píxeles: con `CaptureScale` 1 / 0,73 / 0,5 el coste se ajusta
+a ~55 % fijo + ~45 % proporcional a los píxeles.
+
+| Palanca (no activada) | Coste por portal | Vista de 0 portales | Calibración (< 2 %) |
+|---|---|---|---|
+| Capturas sin Lumen GI (`CaptureGIMethod 0`, reflejos en pantalla) | −7 % | igual | **8,6 %, falla** |
+| Todo sin Lumen (GI 0, reflejos en pantalla, DFAO) | −19 % | −23 % | 0,26 % (sin la GI de Lumen) |
+| Sombras en cascada (`r.Shadow.Virtual.Enable 0`) | −19 % | −12 % | 0,82 % |
+| `CaptureScale 0.73` / `0.5` | −19 % / −33 % | igual | 0,73 % / 0,93 % (la métrica no ve el emborronado, D-30) |
+| Show flags baratos en las capturas (AO, sombras de contacto, niebla volumétrica, rebotes de Lumen…) | sin efecto medible | igual | 1,99 % (al límite) |
+| `Liminal.Scatter.CullScale 0.5` / sin dispersión en las capturas | 0 % / −4 % (ruido) | igual | — |
+
+Recorrido de 216 poses por el hub: 1,48 capturas por fotograma (17 % de poses sin ninguna, 15 % con 3 o 4); solo
+1,15 portales están dentro del frustum y 1,14 tienen la superficie dibujada. El rectángulo de pantalla de un portal
+visible ocupa de media el 8,0 % del viewport (mediana 2,3 %; 9,2 % sumando todos los de un fotograma).
+
+Cruces (dos pasadas por las cuatro puertas, 12 s de espera antes de cada una): el primer cruce del proceso tarda
+~640 ms en un fotograma; los demás, 51-61 ms frente a una mediana de 17-20 ms (×2,9-3,5), un solo fotograma, en
+el render thread; la GPU no pasa de 27 ms. Es Lumen: con `r.DynamicGlobalIlluminationMethod 0` y reflejos en
+pantalla no hay pico (máximo ×1,1-1,5, también en el primer cruce); con sombras en cascada empeora (76-100 ms).
+
+CPU: a resolución normal manda la GPU (fotograma = GPU + 0,5-2,5 ms; game thread 1,3-2,5 ms). Con la GPU casi
+descargada (`r.ScreenPercentage 26`, `CaptureScale 0.1`) el fotograma pasa a ser del render thread: 10,3 / 15,2 /
+19,8 / 32,7 ms con 0 / 1 / 2 / 4 capturas frente a 8,4 / 10,7 / 16,5 / 21,3 ms de GPU (~5 ms de CPU por captura,
+con el portátil limitado por temperatura); el RHI thread sube de 6 a 15 ms.
 
 ## Riesgos abiertos
 

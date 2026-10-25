@@ -8,7 +8,7 @@ motivo para poder razonarla y revertirla.
 
 Una línea por decisión. **Revisar primero** marca las que cambian la arquitectura, se apartan del README
 original o dejan una decisión de fidelidad pendiente. P-01 a P-12 son las doce de partida de
-`docs/PLAN-NOCHE.md` («Decisiones fijadas para esta noche»); D-01 a D-35 están detalladas más abajo.
+`docs/PLAN-NOCHE.md` («Decisiones fijadas para esta noche»); D-01 a D-36 están detalladas más abajo.
 
 | ID | Decisión | Revisar primero |
 |---|---|---|
@@ -59,6 +59,7 @@ original o dejan una decisión de fidelidad pendiente. P-01 a P-12 son las doce 
 | D-33 | Arte importado con escala 1 (UE 5.6 aplica la unidad del FBX), subsistema del editor y colisión por cajas | **Sí**: contradice la escala 100 del encargo |
 | D-34 | Catálogo de arte como tabla en C++ y composición por bioma (cultivos instanciados solo cerca de la puerta) | |
 | D-35 | Terreno facetado a 2,5 m, techo de placas con cámara de 10 cm y niebla antártica más clara | |
+| D-36 | Modo perfil de `Liminal.Bench` (desglose de GPU por pase con un `FEventSink` propio, recorrido y cruces) y diagnóstico del coste por portal | **Sí**: fija qué optimizar |
 
 ## Pendientes de revisión
 
@@ -624,3 +625,38 @@ Las que surjan durante la implementación se añaden aquí con este formato:
   (más facetas pequeñas, 1,5 veces más vértices).
 - **Cómo revertir**: `BuildTerrainMesh` en `World/LiminalTerrainMath.cpp`, `TerrainSpacing` en
   `World/LiminalBiome.h`, `CeilingPlenum` en `World/LiminalWorldLayout.h`, `GetBiomeFog` en `World/LiminalBiome.cpp`.
+
+### D-36 · Modo perfil de Liminal.Bench y diagnóstico del coste por portal
+
+- **Contexto**: a 1080p cada portal cuesta ~4,4-4,9 ms de GPU (D-29, D-30) y el objetivo es el juego lo más fluido
+  posible sin pérdida visual. Antes de optimizar hacía falta saber en qué pases se va ese tiempo, cuántas capturas
+  hace el subsistema en un recorrido normal y si hay tirones al entrar en un bioma.
+- **Elegida**: `Liminal.Bench … profile` (`verify.ps1 -Bench -Profile`). El desglose sale de un
+  `UE::RHI::GPUProfiler::FEventSink` propio (`Debug/LiminalGpuProfile.*`), el mismo flujo de eventos que alimenta
+  `ProfileGPU` y `stat gpu` en UE 5.6 (`RHI_NEW_GPU_PROFILER`): acumula el tiempo ocupado de cada cola por ruta de
+  migas de RDG, como el sumidero de `ProfileGPU`, durante los fotogramas medidos de cada caso. Las capturas llevan
+  `ProfilingEventName = "LiminalCapture <portal>"`, así que su subárbol se separa de la vista principal
+  (`Frame/SceneRender - ViewFamilies`). `Tools/Verify/summarize_profile.py` reparte el tiempo exclusivo por
+  categorías (Lumen, VSM, TSR, base pass…). Después de los casos, un recorrido de 216 poses por el hub
+  (`MakeHubWalkPoses`, 10 fotogramas por pose) anota capturas, superficies dibujadas en la vista principal
+  (`GetLastRenderTimeOnScreen`) y la fracción del viewport del rectángulo de pantalla de cada portal
+  (`ComputeScreenRectFraction`, con test), y dos pasadas de cruces por las cuatro puertas (12 s de espera, caminata
+  y 15 fotogramas antes y después del cruce). Para un desglose aditivo se mide con `r.RDG.AsyncCompute 0`: con
+  cómputo asíncrono la suma de colas supera el tiempo del fotograma (Lumen corre solapado en la cola de cómputo).
+  CVars de experimento nuevas, todas apagadas por defecto: `Liminal.Portal.CaptureGIMethod`,
+  `Liminal.Portal.CaptureShowFlags`, `Liminal.Scatter.CullScale`.
+- **Medido** (RTX 4060 Laptop, 1080p, `Saved/BenchLevers36/`): ver «Desglose por pase y palancas (D-36)» en el
+  README. Resumen: una captura cuesta lo que la vista principal menos TSR y post-process (~2,9 + 0,3 ms), pero a
+  resolución completa; ~55 % del coste por captura no depende de los píxeles (VSM, volumen de translucidez de
+  Lumen, escena de Lumen, culling) y ~45 % sí. En el recorrido se capturan 1,48 portales por fotograma y solo 1,15
+  están dentro del frustum (el test de cono de `IsPortalPotentiallyVisible` es holgado); la oclusión real apenas
+  quita 0,01 más. Un portal visible ocupa de media el 8 % del viewport. Cada cruce da un fotograma de 51-61 ms
+  (×3 la mediana) en el render thread, sin pico de GPU, y el primero del proceso ~640 ms; sin Lumen desaparece.
+- **Advertencia de medida**: el portátil limita la GPU por temperatura (87-88 °C, 2295 de 3105 MHz, motivo «SW
+  thermal slowdown»); entre ejecuciones de la misma configuración el coste por portal varía hasta un 35 %. Las
+  palancas se comparan por el cociente coste por portal / vista apagada de la misma ejecución, que deja un ruido
+  de ±10 %: efectos menores no se distinguen.
+- **Alternativas**: parsear la salida de texto de `ProfileGPU` (un solo fotograma por volcado y formato frágil);
+  `stat gpu` (agrega todas las vistas, no separa capturas); Unreal Insights (manual).
+- **Cómo revertir**: `Debug/LiminalGpuProfile.*`, `Debug/LiminalBenchWalk.*`, `Debug/LiminalBenchCrossing.*`, la fase
+  `Walk`/`Cross` de `Debug/LiminalBench.cpp`, `-Profile` en `Tools/verify.ps1`.

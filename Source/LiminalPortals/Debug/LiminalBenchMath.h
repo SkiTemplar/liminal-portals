@@ -72,4 +72,21 @@ namespace LiminalBenchMath
 	LIMINALPORTALS_API int32 CountPotentiallyVisiblePortals(TConstArrayView<FTransform> PlaneTransforms,
 		const FVector2D& HalfExtents, const FVector& CameraLocation, const FVector& CameraForward,
 		float HorizontalFOVDegrees, float AspectRatio);
+
+	/**
+	 * Recorrido del modo perfil (D-36): rejilla de 6 × 3 posiciones por la sala del hub por defecto
+	 * (X de −650 a +600 cada 250 cm, Y = −150, 0 y +150) y 12 orientaciones cada 30°. Ninguna pose queda a
+	 * menos de 150 cm de un plano de portal. ExpectedCaptures = −1: no se fija.
+	 */
+	LIMINALPORTALS_API TArray<FBenchPose> MakeHubWalkPoses();
+
+	/**
+	 * Fracción del viewport que ocupa el rectángulo de pantalla del polígono Corners (la caja envolvente de
+	 * su proyección, recortada al viewport): lo que renderizaría una captura recortada con proyección fuera
+	 * de eje. El polígono se recorta antes contra el plano cercano (NearPlane cm delante de la cámara).
+	 * FOV horizontal, como FMinimalViewInfo con AspectRatio >= 1.
+	 * @return 0 si el polígono queda detrás de la cámara o fuera del viewport; 1 si lo cubre entero.
+	 */
+	LIMINALPORTALS_API double ComputeScreenRectFraction(TConstArrayView<FVector> Corners, const FVector& ViewLocation,
+		const FRotator& ViewRotation, float HorizontalFOVDegrees, float AspectRatio, double NearPlane = 10.0);
 }

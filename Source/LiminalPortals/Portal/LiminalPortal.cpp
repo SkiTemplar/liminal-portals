@@ -41,6 +41,20 @@ namespace
 		TEXT("1 = Lumen, 2 = pantalla)."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<int32> CVarCaptureGIMethod(
+		TEXT("Liminal.Portal.CaptureGIMethod"),
+		-1,
+		TEXT("Experimento de coste (D-36): iluminación global de las capturas (-1 = la del proyecto, 0 = ninguna, ")
+		TEXT("1 = Lumen, 2 = en pantalla)."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<FString> CVarCaptureShowFlags(
+		TEXT("Liminal.Portal.CaptureShowFlags"),
+		TEXT(""),
+		TEXT("Experimento de coste (D-36): show flags de las capturas, \"Nombre=0+Nombre=1\" (con +: -ExecCmds parte por comas) ")
+		TEXT("(p. ej. \"DistanceFieldAO=0+VolumetricFog=0\"; vacío = los de por defecto)."),
+		ECVF_Default);
+
 	void PlaceBox(UStaticMeshComponent* Component, const FVector& Center, const FVector& Size)
 	{
 		Component->SetRelativeLocation(Center);
@@ -83,9 +97,11 @@ namespace
 		static const TConsoleVariableData<int32>* ReflectionMethod =
 			IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.ReflectionMethod"));
 
+		const int32 CaptureGI = CVarCaptureGIMethod.GetValueOnGameThread();
+		const bool bOverrideGI = CaptureGI >= EDynamicGlobalIlluminationMethod::None && CaptureGI <= EDynamicGlobalIlluminationMethod::ScreenSpace;
+		const int32 ProjectGI = GIMethod ? GIMethod->GetValueOnGameThread() : EDynamicGlobalIlluminationMethod::Lumen;
 		Settings.bOverride_DynamicGlobalIlluminationMethod = true;
-		Settings.DynamicGlobalIlluminationMethod = static_cast<EDynamicGlobalIlluminationMethod::Type>(
-			GIMethod ? GIMethod->GetValueOnGameThread() : EDynamicGlobalIlluminationMethod::Lumen);
+		Settings.DynamicGlobalIlluminationMethod = static_cast<EDynamicGlobalIlluminationMethod::Type>(bOverrideGI ? CaptureGI : ProjectGI);
 		const int32 CaptureReflection = CVarCaptureReflectionMethod.GetValueOnGameThread();
 		const bool bOverrideReflection = CaptureReflection >= EReflectionMethod::None && CaptureReflection <= EReflectionMethod::ScreenSpace;
 		const int32 ProjectReflection = ReflectionMethod ? ReflectionMethod->GetValueOnGameThread() : EReflectionMethod::Lumen;
@@ -192,6 +208,8 @@ void ALiminalPortal::BeginPlay()
 	ApplyLayout();
 	ApplyMaterials();
 	SetSurfaceHiddenInGame(false);
+	// Nombre de la miga de GPU de la captura: Liminal.Bench en modo perfil la separa de la vista principal.
+	Capture->ProfilingEventName = FString::Printf(TEXT("LiminalCapture %s"), *GetName());
 
 	if (!LinkedPortal)
 	{
@@ -340,6 +358,7 @@ bool ALiminalPortal::CaptureView(const FMinimalViewInfo& View, const FIntPoint& 
 	Capture->SetWorldLocationAndRotation(CapturePose.GetLocation(), CapturePose.GetRotation());
 	Capture->FOVAngle = View.FOV;
 	MatchProjectLighting(Capture->PostProcessSettings);
+	ApplyCaptureShowFlags();
 
 	const LiminalPortalMath::FClipPlane ClipPlane =
 		LiminalPortalMath::ComputeClipPlane(LinkedPortal->GetPlaneTransform(), ClipPlaneOffset);
@@ -357,6 +376,38 @@ bool ALiminalPortal::CaptureView(const FMinimalViewInfo& View, const FIntPoint& 
 	bHasCaptureState = true;
 	LastCaptureSeconds = GetWorld()->GetRealTimeSeconds();
 	return true;
+}
+
+void ALiminalPortal::ApplyCaptureShowFlags()
+{
+	const FString Spec = CVarCaptureShowFlags.GetValueOnGameThread();
+	if (Spec == AppliedShowFlagSpec)
+	{
+		return;
+	}
+	for (const TPair<uint32, bool>& Original : AppliedShowFlagOriginals)
+	{
+		Capture->ShowFlags.SetSingleFlag(Original.Key, Original.Value);
+	}
+	AppliedShowFlagOriginals.Reset();
+	AppliedShowFlagSpec = Spec;
+
+	TArray<FString> Entries;
+	Spec.ParseIntoArray(Entries, TEXT("+"), true);
+	for (const FString& Entry : Entries)
+	{
+		FString Name;
+		FString Value;
+		const int32 Index = Entry.Split(TEXT("="), &Name, &Value) ? FEngineShowFlags::FindIndexByName(*Name.TrimStartAndEnd()) : INDEX_NONE;
+		if (Index == INDEX_NONE)
+		{
+			UE_LOG(LogLiminalPortals, Warning, TEXT("%s: Liminal.Portal.CaptureShowFlags: '%s' no es Nombre=0|1 con un show flag conocido."),
+				*GetName(), *Entry);
+			continue;
+		}
+		AppliedShowFlagOriginals.Emplace(Index, Capture->ShowFlags.GetSingleFlag(Index));
+		Capture->ShowFlags.SetSingleFlag(Index, Value.TrimStartAndEnd() != TEXT("0"));
+	}
 }
 
 bool ALiminalPortal::ReleaseCaptureStateIfIdle(double NowSeconds, const FVector& CameraLocation, double IdleSeconds,

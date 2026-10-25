@@ -58,6 +58,34 @@ namespace LiminalBenchDetail
 		const IConsoleVariable* Variable = FindCVar(Name);
 		return Variable ? Variable->GetString() : FString();
 	}
+
+	/** Pases de menos de esto por fotograma no entran en BenchProfile.json. */
+	constexpr double MinProfileMsPerFrame = 0.005;
+
+	/** CVars que cambian lo que se mide (las de las palancas de D-30 y D-36 incluidas). */
+	TSharedRef<FJsonObject> CVarsToJson()
+	{
+		const TSharedRef<FJsonObject> CVars = MakeShared<FJsonObject>();
+		for (const TCHAR* Name : { TEXT("r.VSync"), TEXT("t.MaxFPS"), TEXT("r.ScreenPercentage"), TEXT("r.AntiAliasingMethod"),
+			TEXT("r.DynamicGlobalIlluminationMethod"), TEXT("r.ReflectionMethod"), TEXT("r.Shadow.Virtual.Enable"),
+			TEXT("r.DistanceFieldAO"), TEXT("Liminal.Portal.CaptureScale"), TEXT("Liminal.Portal.CaptureReflectionMethod"),
+			TEXT("Liminal.Portal.CaptureGIMethod"), TEXT("Liminal.Portal.CaptureShowFlags"), TEXT("Liminal.Scatter.CullScale") })
+		{
+			CVars->SetStringField(Name, CVarString(Name));
+		}
+		return CVars;
+	}
+
+	bool SaveJson(const TSharedRef<FJsonObject>& Root, const FString& Path)
+	{
+		FString Json;
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+		if (!FJsonSerializer::Serialize(Root, Writer))
+		{
+			return false;
+		}
+		return FFileHelper::SaveStringToFile(Json, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	}
 }
 
 FLiminalBenchRun::FLiminalBenchRun(UWorld* InWorld, const FConfig& InConfig)
@@ -90,6 +118,11 @@ bool FLiminalBenchRun::Start(FString& OutError)
 		return false;
 	}
 	OriginalPortalsEnable = EnableVariable->GetInt();
+	if (Config.bProfile && !LiminalGpuProfile::IsAvailable())
+	{
+		OutError = TEXT("el modo perfil necesita el perfilador de GPU nuevo con migas (no en Shipping)");
+		return false;
+	}
 
 	Subsystem = PortalSubsystem;
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FLiminalBenchRun::OnTick));
@@ -141,6 +174,12 @@ bool FLiminalBenchRun::OnTick(float DeltaTime)
 	case EPhase::Measure:
 		SampleFrame(DeltaTime);
 		break;
+	case EPhase::Walk:
+		UpdateWalk();
+		break;
+	case EPhase::Cross:
+		UpdateCrossing(DeltaTime);
+		break;
 	default:
 		break;
 	}
@@ -185,7 +224,7 @@ bool FLiminalBenchRun::BuildCases(FString& OutError)
 		return false;
 	}
 	const ALiminalHub* Hub = *HubIt;
-	const FTransform HubTransform(Hub->GetActorQuat(), Hub->GetActorLocation());
+	HubTransform = FTransform(Hub->GetActorQuat(), Hub->GetActorLocation());
 
 	for (const LiminalBenchMath::FBenchPose& Pose : LiminalBenchMath::MakeHubBenchPoses())
 	{
@@ -228,6 +267,10 @@ void FLiminalBenchRun::BeginMeasure()
 	}
 	FCase& Case = Cases[CurrentCase];
 	Case.PredictedVisible = PredictVisible(Case);
+	if (Config.bProfile)
+	{
+		LiminalGpuProfile::BeginRecording();
+	}
 }
 
 int32 FLiminalBenchRun::PredictVisible(const FCase& Case) const
@@ -279,6 +322,9 @@ void FLiminalBenchRun::SampleFrame(float DeltaTime)
 		Case.RenderThreadMs.Add(LiminalBenchDetail::CyclesToMs(GRenderThreadTime));
 		Case.GameThreadMs.Add(LiminalBenchDetail::CyclesToMs(GGameThreadTime));
 		Case.FrameMs.Add(static_cast<double>(DeltaTime) * 1000.0);
+		Case.RhiThreadMs.Add(LiminalBenchDetail::CyclesToMs(GRHIThreadTime));
+		Case.RenderThreadWaitMs.Add(LiminalBenchDetail::CyclesToMs(GRenderThreadWaitTime));
+		Case.GameThreadWaitMs.Add(LiminalBenchDetail::CyclesToMs(GGameThreadWaitTime));
 	}
 
 	uint64 GpuCycles64 = 0;
@@ -313,6 +359,13 @@ void FLiminalBenchRun::FinishCase()
 	Case.RenderThread = LiminalBenchMath::ComputeStats(Case.RenderThreadMs);
 	Case.GameThread = LiminalBenchMath::ComputeStats(Case.GameThreadMs);
 	Case.Frame = LiminalBenchMath::ComputeStats(Case.FrameMs);
+	Case.RhiThread = LiminalBenchMath::ComputeStats(Case.RhiThreadMs);
+	Case.RenderThreadWait = LiminalBenchMath::ComputeStats(Case.RenderThreadWaitMs);
+	Case.GameThreadWait = LiminalBenchMath::ComputeStats(Case.GameThreadWaitMs);
+	if (Config.bProfile)
+	{
+		Case.Profile = LiminalGpuProfile::EndRecording();
+	}
 	UE_LOG(LogLiminalPortals, Display, TEXT("Liminal.Bench: %s GPU %.3f ms (p50 %.3f, p95 %.3f), RT %.3f ms, GT %.3f ms, capturas %d-%d (esperadas %d)"),
 		*Case.Pose.Name, Case.Gpu.Mean, Case.Gpu.P50, Case.Gpu.P95, Case.RenderThread.Mean, Case.GameThread.Mean,
 		Case.MinCaptures, Case.MaxCaptures, Case.Pose.ExpectedCaptures);
@@ -333,9 +386,63 @@ void FLiminalBenchRun::FinishCase()
 	{
 		BeginCase(CurrentCase + 1);
 	}
+	else if (Config.bProfile)
+	{
+		BeginWalk();
+	}
 	else
 	{
 		Finish(FString());
+	}
+}
+
+void FLiminalBenchRun::BeginWalk()
+{
+	Phase = EPhase::Walk;
+	PhaseFrames = 0;
+	SetPortalsEnabled(true);
+	Walk.Begin(HubTransform);
+	uint64 Discarded = 0;
+	while (GpuHistory.PopFrameCycles(Discarded) != FRHIGPUFrameTimeHistory::EResult::Empty)
+	{
+	}
+	UE_LOG(LogLiminalPortals, Display, TEXT("Liminal.Bench: recorrido del hub (%d fotogramas por pose)"), FLiminalBenchWalk::HoldFrames);
+}
+
+void FLiminalBenchRun::UpdateWalk()
+{
+	Walk.Tick(World.Get(), PlayerController.Get(), Character.Get(), *Subsystem);
+	uint64 GpuCycles64 = 0;
+	while (GpuHistory.PopFrameCycles(GpuCycles64) != FRHIGPUFrameTimeHistory::EResult::Empty)
+	{
+		Walk.AddGpuSample(FPlatformTime::ToMilliseconds64(GpuCycles64));
+	}
+	if (!Walk.IsFinished())
+	{
+		return;
+	}
+	if (Subsystem->GetTeleportCount() != TeleportsAtStart)
+	{
+		Finish(TEXT("hubo un teletransporte durante el recorrido"));
+		return;
+	}
+	Phase = EPhase::Cross;
+	Crossing.Begin(World.Get(), HubTransform);
+	UE_LOG(LogLiminalPortals, Display, TEXT("Liminal.Bench: cruces por las puertas del hub (%.0f s de espera antes de cada uno)"),
+		FLiminalBenchCrossing::HoldSeconds);
+}
+
+void FLiminalBenchRun::UpdateCrossing(float DeltaTime)
+{
+	Crossing.Tick(DeltaTime, PlayerController.Get(), Character.Get(), *Subsystem);
+	uint64 GpuCycles64 = 0;
+	while (GpuHistory.PopFrameCycles(GpuCycles64) != FRHIGPUFrameTimeHistory::EResult::Empty)
+	{
+		Crossing.AddGpuSample(FPlatformTime::ToMilliseconds64(GpuCycles64));
+	}
+	if (Crossing.IsFinished())
+	{
+		Finish(Crossing.GetError());
 	}
 }
 
@@ -362,7 +469,11 @@ void FLiminalBenchRun::Finish(const FString& Error)
 		Variable->Set(OriginalPortalsEnable, ECVF_SetByConsole);
 	}
 
-	const bool bWritten = WriteReport(Error);
+	bool bWritten = WriteReport(Error);
+	if (Config.bProfile)
+	{
+		bWritten &= WriteProfileReport(Error);
+	}
 	if (Error.IsEmpty() && bWritten)
 	{
 		UE_LOG(LogLiminalPortals, Display, TEXT("Liminal.Bench: %d casos en %s"), Cases.Num(), *Config.OutputPath);
@@ -405,6 +516,9 @@ TSharedRef<FJsonObject> FLiminalBenchRun::CaseToJson(const FCase& Case)
 	Object->SetObjectField(TEXT("renderThreadMs"), StatsToJson(Case.RenderThread));
 	Object->SetObjectField(TEXT("gameThreadMs"), StatsToJson(Case.GameThread));
 	Object->SetObjectField(TEXT("frameMs"), StatsToJson(Case.Frame));
+	Object->SetObjectField(TEXT("rhiThreadMs"), StatsToJson(Case.RhiThread));
+	Object->SetObjectField(TEXT("renderThreadWaitMs"), StatsToJson(Case.RenderThreadWait));
+	Object->SetObjectField(TEXT("gameThreadWaitMs"), StatsToJson(Case.GameThreadWait));
 	return Object;
 }
 
@@ -505,14 +619,6 @@ bool FLiminalBenchRun::WriteReport(const FString& Error) const
 		CaseValues.Add(MakeShared<FJsonValueObject>(CaseToJson(Case)));
 	}
 
-	const TSharedRef<FJsonObject> CVars = MakeShared<FJsonObject>();
-	for (const TCHAR* Name : { TEXT("r.VSync"), TEXT("t.MaxFPS"), TEXT("r.ScreenPercentage"), TEXT("r.AntiAliasingMethod"),
-		TEXT("r.DynamicGlobalIlluminationMethod"), TEXT("r.ReflectionMethod"),
-		TEXT("Liminal.Portal.CaptureScale"), TEXT("Liminal.Portal.CaptureReflectionMethod") })
-	{
-		CVars->SetStringField(Name, CVarString(Name));
-	}
-
 	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetBoolField(TEXT("complete"), Error.IsEmpty() && bAllMeasured);
 	Root->SetStringField(TEXT("error"), Error);
@@ -525,15 +631,46 @@ bool FLiminalBenchRun::WriteReport(const FString& Error) const
 	Root->SetNumberField(TEXT("warmupFrames"), Config.WarmupFrames);
 	Root->SetNumberField(TEXT("firstCaseExtraWarmup"), Config.FirstCaseExtraWarmup);
 	Root->SetNumberField(TEXT("measureFrames"), Config.MeasureFrames);
-	Root->SetObjectField(TEXT("cvars"), CVars);
+	Root->SetObjectField(TEXT("cvars"), CVarsToJson());
 	Root->SetArrayField(TEXT("cases"), CaseValues);
 	Root->SetObjectField(TEXT("perPortal"), PerPortalToJson());
+	return SaveJson(Root, Config.OutputPath);
+}
 
-	FString Json;
-	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
-	if (!FJsonSerializer::Serialize(Root, Writer))
+bool FLiminalBenchRun::WriteProfileReport(const FString& Error) const
+{
+	using namespace LiminalBenchDetail;
+
+	TArray<TSharedPtr<FJsonValue>> CaseValues;
+	for (const FCase& Case : Cases)
 	{
-		return false;
+		const TSharedRef<FJsonObject> Object = LiminalBenchProfileJson::SnapshotToJson(Case.Profile, MinProfileMsPerFrame);
+		Object->SetStringField(TEXT("name"), Case.Pose.Name);
+		Object->SetBoolField(TEXT("measured"), Case.bMeasured);
+		Object->SetNumberField(TEXT("captures"), Case.bMeasured ? Case.MaxCaptures : -1);
+		Object->SetNumberField(TEXT("gpuMsMean"), Case.Gpu.Mean);
+		Object->SetNumberField(TEXT("frameMsMean"), Case.Frame.Mean);
+		Object->SetNumberField(TEXT("fpsMean"), Case.Frame.Mean > 0.0 ? 1000.0 / Case.Frame.Mean : 0.0);
+		Object->SetNumberField(TEXT("gameThreadMsMean"), Case.GameThread.Mean);
+		Object->SetNumberField(TEXT("renderThreadMsMean"), Case.RenderThread.Mean);
+		Object->SetNumberField(TEXT("renderThreadWaitMsMean"), Case.RenderThreadWait.Mean);
+		Object->SetNumberField(TEXT("rhiThreadMsMean"), Case.RhiThread.Mean);
+		Object->SetNumberField(TEXT("gameThreadWaitMsMean"), Case.GameThreadWait.Mean);
+		CaseValues.Add(MakeShared<FJsonValueObject>(Object));
 	}
-	return FFileHelper::SaveStringToFile(Json, *Config.OutputPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetBoolField(TEXT("complete"), Error.IsEmpty() && Walk.IsFinished() && Crossing.IsFinished());
+	Root->SetStringField(TEXT("error"), Error);
+	Root->SetStringField(TEXT("gpu"), GRHIAdapterName);
+	Root->SetStringField(TEXT("source"), TEXT("UE::RHI::GPUProfiler::FEventSink (migas de RDG, tiempo ocupado por cola)"));
+	Root->SetNumberField(TEXT("maxDepth"), LiminalGpuProfile::MaxDepth);
+	Root->SetNumberField(TEXT("minMsPerFrame"), MinProfileMsPerFrame);
+	Root->SetArrayField(TEXT("viewport"), LiminalDebugShared::ToJsonArray({ static_cast<double>(Viewport.X), static_cast<double>(Viewport.Y) }));
+	Root->SetArrayField(TEXT("renderTarget"), LiminalDebugShared::ToJsonArray({ static_cast<double>(CaptureSize.X), static_cast<double>(CaptureSize.Y) }));
+	Root->SetObjectField(TEXT("cvars"), CVarsToJson());
+	Root->SetArrayField(TEXT("cases"), CaseValues);
+	Root->SetObjectField(TEXT("walk"), Walk.ToJson());
+	Root->SetObjectField(TEXT("crossings"), Crossing.ToJson());
+	return SaveJson(Root, Config.ProfileOutputPath);
 }

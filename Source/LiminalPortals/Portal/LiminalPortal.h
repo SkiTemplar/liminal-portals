@@ -145,6 +145,8 @@ private:
 	void SetSurfaceDepth(float Depth);
 	void ApplyMaterials();
 	bool EnsureRenderTarget(const FIntPoint& Size);
+	/** Aplica Liminal.Portal.CaptureShowFlags a la captura (D-36); restaura los valores de la especificación anterior. */
+	void ApplyCaptureShowFlags();
 
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<USceneComponent> Root;
@@ -181,4 +183,8 @@ private:
 	/** Instante (segundos reales del mundo) de la última captura; solo vale si bHasCaptureState. */
 	double LastCaptureSeconds = 0.0;
 	bool bHasCaptureState = false;
+
+	/** Especificación de Liminal.Portal.CaptureShowFlags aplicada y valor original de cada show flag que cambió. */
+	FString AppliedShowFlagSpec;
+	TArray<TPair<uint32, bool>> AppliedShowFlagOriginals;
 };

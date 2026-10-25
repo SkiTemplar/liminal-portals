@@ -3,6 +3,9 @@
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
 #include "Debug/LiminalBenchMath.h"
+#include "Debug/LiminalBenchCrossing.h"
+#include "Debug/LiminalBenchWalk.h"
+#include "Debug/LiminalGpuProfile.h"
 #include "GPUProfiler.h"
 
 class ALiminalCharacter;
@@ -36,6 +39,10 @@ public:
 		int32 MeasureFrames = 240;
 		/** Tope de fotogramas de la ejecución completa. */
 		int32 MaxTotalFrames = 20000;
+		/** Modo perfil (D-36): desglose de GPU por pase en cada caso y recorrido del hub. */
+		bool bProfile = false;
+		/** Ruta absoluta del informe del modo perfil. */
+		FString ProfileOutputPath;
 	};
 
 	FLiminalBenchRun(UWorld* InWorld, const FConfig& InConfig);
@@ -53,6 +60,8 @@ private:
 		WaitPawn,
 		Warmup,
 		Measure,
+		Walk,
+		Cross,
 		Finished,
 	};
 
@@ -70,10 +79,18 @@ private:
 		TArray<double> RenderThreadMs;
 		TArray<double> GameThreadMs;
 		TArray<double> FrameMs;
+		TArray<double> RhiThreadMs;
+		TArray<double> RenderThreadWaitMs;
+		TArray<double> GameThreadWaitMs;
 		LiminalBenchMath::FSampleStats Gpu;
 		LiminalBenchMath::FSampleStats RenderThread;
 		LiminalBenchMath::FSampleStats GameThread;
 		LiminalBenchMath::FSampleStats Frame;
+		LiminalBenchMath::FSampleStats RhiThread;
+		LiminalBenchMath::FSampleStats RenderThreadWait;
+		LiminalBenchMath::FSampleStats GameThreadWait;
+		/** Desglose de GPU del caso (solo en modo perfil). */
+		LiminalGpuProfile::FSnapshot Profile;
 		bool bMeasured = false;
 
 		bool CapturesMatch() const { return bMeasured && MinCaptures == Pose.ExpectedCaptures && MaxCaptures == Pose.ExpectedCaptures; }
@@ -89,6 +106,9 @@ private:
 	void SampleFrame(float DeltaTime);
 	void FinishCase();
 	int32 PredictVisible(const FCase& Case) const;
+	void BeginWalk();
+	void UpdateWalk();
+	void UpdateCrossing(float DeltaTime);
 
 	void SetPortalsEnabled(bool bEnabled) const;
 	void Finish(const FString& Error);
@@ -96,6 +116,7 @@ private:
 	static TSharedRef<FJsonObject> CaseToJson(const FCase& Case);
 	TSharedRef<FJsonObject> PerPortalToJson() const;
 	bool WriteReport(const FString& Error) const;
+	bool WriteProfileReport(const FString& Error) const;
 
 	FConfig Config;
 	TWeakObjectPtr<UWorld> World;
@@ -108,6 +129,9 @@ private:
 	FRHIGPUFrameTimeHistory::FState GpuHistory;
 
 	TArray<FCase> Cases;
+	FLiminalBenchWalk Walk;
+	FLiminalBenchCrossing Crossing;
+	FTransform HubTransform = FTransform::Identity;
 	EPhase Phase = EPhase::WaitPawn;
 	int32 CurrentCase = 0;
 	int32 PhaseFrames = 0;

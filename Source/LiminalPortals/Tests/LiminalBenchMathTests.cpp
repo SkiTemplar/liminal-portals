@@ -2,6 +2,7 @@
 #include "Debug/LiminalBenchMath.h"
 #include "Debug/LiminalCalibrationMath.h"
 #include "World/LiminalWorldLayout.h"
+#include "Portal/LiminalPortalMath.h"
 
 // Tests de las funciones puras de Liminal.Bench (E5). Cada test incluye casos positivos y negativos.
 
@@ -176,5 +177,71 @@ bool FLiminalBenchPosesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Mirando al techo"),
 		CountPotentiallyVisiblePortals(Planes, BenchHalfExtents, FVector(0.0, 0.0, BenchEyeHeight), FVector::UpVector, 20.f, 16.f / 9.f), 0);
 	TestEqual(TEXT("Sin portales"), CountPotentiallyVisiblePortals(TArray<FTransform>(), BenchHalfExtents, Outside, FVector::ForwardVector, BenchFOV, 1.f), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBenchWalkPosesTest, "LiminalPortals.Bench.Walk.PosesInsideHub", BenchMathTestFlags)
+bool FLiminalBenchWalkPosesTest::RunTest(const FString& Parameters)
+{
+	const TArray<FTransform> Planes = MakeDefaultHubPlanes();
+	const TArray<FBenchPose> Poses = MakeHubWalkPoses();
+	UTEST_EQUAL(TEXT("6 × 3 posiciones × 12 orientaciones"), Poses.Num(), 216);
+
+	TSet<FString> Names;
+	int32 PosesWithPortals = 0;
+	for (const FBenchPose& Pose : Poses)
+	{
+		Names.Add(Pose.Name);
+		TestEqual(*FString::Printf(TEXT("%s: sin capturas fijadas"), *Pose.Name), Pose.ExpectedCaptures, -1);
+		TestTrue(*FString::Printf(TEXT("%s: dentro de la sala"), *Pose.Name),
+			FMath::Abs(Pose.Feet.X) <= 800.0 - 34.0 && FMath::Abs(Pose.Feet.Y) <= 300.0 - 34.0);
+		const FVector Eye(Pose.Feet.X, Pose.Feet.Y, BenchEyeHeight);
+		for (const FTransform& Plane : Planes)
+		{
+			// Lejos de cualquier plano: el recorrido no puede disparar un cruce.
+			TestTrue(*FString::Printf(TEXT("%s: a 150 cm o más del plano"), *Pose.Name),
+				LiminalPortalMath::SignedDistanceToPlane(Plane, Eye) >= 150.0 - 1e-6);
+		}
+		const FVector Forward = FRotator(0.0, Pose.Yaw, 0.0).Vector();
+		PosesWithPortals += CountPotentiallyVisiblePortals(Planes, BenchHalfExtents, Eye, Forward, BenchFOV, 16.f / 9.f) > 0 ? 1 : 0;
+	}
+	TestEqual(TEXT("Nombres únicos"), Names.Num(), Poses.Num());
+	// Negativo: un recorrido que mire siempre a la pared del fondo no vería portales; este sí los ve.
+	TestTrue(TEXT("Hay poses con portales y poses sin ellos"), PosesWithPortals > 0 && PosesWithPortals < Poses.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBenchScreenRectTest, "LiminalPortals.Bench.ScreenRect.Fraction", BenchMathTestFlags)
+bool FLiminalBenchScreenRectTest::RunTest(const FString& Parameters)
+{
+	// FOV horizontal de 90° (tangente 1) y 16:9 (tangente vertical 0,5625); cámara en el origen mirando a +X.
+	const float Aspect = 16.f / 9.f;
+	auto Quad = [](double X0, double X1, double Y0, double Y1, double Z0, double Z1)
+	{
+		return TArray<FVector>{ FVector(X0, Y0, Z0), FVector(X1, Y1, Z0), FVector(X1, Y1, Z1), FVector(X0, Y0, Z1) };
+	};
+
+	// De frente a 4 m, 200 × 100 cm: u = ±0,25, v = ±0,2222 ⇒ (0,5 · 0,4444) / 4.
+	TestNearlyEqual(TEXT("De frente"), ComputeScreenRectFraction(Quad(400, 400, -100, 100, -50, 50), FVector::ZeroVector,
+		FRotator::ZeroRotator, 90.f, Aspect), 0.5 * (100.0 / 225.0) / 4.0, 1e-9);
+	// El mismo rectángulo visto desde una cámara girada 90° y desplazada da lo mismo.
+	TestNearlyEqual(TEXT("Cámara girada"), ComputeScreenRectFraction(Quad(-100, 100, 400, 400, -50, 50), FVector::ZeroVector,
+		FRotator(0.0, 90.0, 0.0), 90.f, Aspect), 0.5 * (100.0 / 225.0) / 4.0, 1e-6);
+	// Más grande que la pantalla: la cubre entera.
+	TestNearlyEqual(TEXT("Cubre el viewport"), ComputeScreenRectFraction(Quad(100, 100, -500, 500, -500, 500), FVector::ZeroVector,
+		FRotator::ZeroRotator, 90.f, Aspect), 1.0, 1e-9);
+	// Tira lateral que cruza el plano cercano (10 cm): u de 50/300 a 1 (recortado) y v recortado a ±1.
+	TestNearlyEqual(TEXT("Cruza el plano cercano"), ComputeScreenRectFraction(Quad(-100, 300, 50, 50, -50, 50), FVector::ZeroVector,
+		FRotator::ZeroRotator, 90.f, Aspect), (1.0 - 50.0 / 300.0) * 2.0 / 4.0, 1e-9);
+
+	// Negativos: detrás de la cámara, fuera por la derecha, vista no válida y polígono degenerado.
+	TestEqual(TEXT("Detrás"), ComputeScreenRectFraction(Quad(-400, -400, -100, 100, -50, 50), FVector::ZeroVector,
+		FRotator::ZeroRotator, 90.f, Aspect), 0.0);
+	TestEqual(TEXT("Fuera por la derecha"), ComputeScreenRectFraction(Quad(400, 400, 500, 700, -50, 50), FVector::ZeroVector,
+		FRotator::ZeroRotator, 90.f, Aspect), 0.0);
+	TestEqual(TEXT("FOV no válido"), ComputeScreenRectFraction(Quad(400, 400, -100, 100, -50, 50), FVector::ZeroVector,
+		FRotator::ZeroRotator, 0.f, Aspect), 0.0);
+	TestEqual(TEXT("Dos puntos"), ComputeScreenRectFraction(TArray<FVector>{ FVector(400, 0, 0), FVector(400, 10, 0) },
+		FVector::ZeroVector, FRotator::ZeroRotator, 90.f, Aspect), 0.0);
 	return true;
 }

@@ -5,7 +5,10 @@
 #include "Components/LocalFogVolumeComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
+#include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
+#include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 #include "LiminalPortals.h"
 #include "Materials/MaterialInterface.h"
 #include "ProceduralMeshComponent.h"
@@ -21,6 +24,44 @@ namespace LiminalBiomeDetail
 {
 	/** Margen sin dispersión en el borde del terreno, en cm. */
 	constexpr double ScatterEdgeMargin = 500.0;
+
+	TAutoConsoleVariable<float> CVarScatterCullScale(
+		TEXT("Liminal.Scatter.CullScale"),
+		1.f,
+		TEXT("Experimento de coste (D-36): escala de las distancias de corte de la dispersión (1 = las del catálogo; ")
+		TEXT("las categorías sin corte no cambian)."),
+		ECVF_Default);
+
+	float GetScatterCullScale()
+	{
+		return FMath::Max(CVarScatterCullScale.GetValueOnGameThread(), 0.01f);
+	}
+
+	/** Aplica la escala a los biomas de los mundos de juego cuando cambia la CVar. */
+	void OnConsoleVariablesChanged()
+	{
+		static float AppliedScale = 1.f;
+		const float Scale = GetScatterCullScale();
+		if (Scale == AppliedScale || !GEngine)
+		{
+			return;
+		}
+		AppliedScale = Scale;
+		for (const FWorldContext& Context : GEngine->GetWorldContexts())
+		{
+			UWorld* World = Context.World();
+			if (!World || !World->IsGameWorld())
+			{
+				continue;
+			}
+			for (TActorIterator<ALiminalBiome> It(World); It; ++It)
+			{
+				It->ApplyScatterCullScale(Scale);
+			}
+		}
+	}
+
+	FAutoConsoleVariableSink GScatterCullScaleSink(FConsoleCommandDelegate::CreateStatic(&OnConsoleVariablesChanged));
 
 	/**
 	 * Niebla local por tipo de bioma, en las unidades de ULocalFogVolumeComponent. Ojo (D-25): el
@@ -258,6 +299,7 @@ void ALiminalBiome::DestroyProceduralComponents()
 		}
 	}
 	ScatterComponents.Reset();
+	ScatterCullDistances.Reset();
 	ScatterInstanceCount = 0;
 	ScatterTriangleCount = 0;
 	NearInstanceCount = 0;
@@ -359,12 +401,14 @@ void ALiminalBiome::AddScatterComponent(ELiminalScatterCategory Category, int32 
 	const double CullDistance = LiminalArtCatalog::GetCullDistance(Category);
 	if (CullDistance > 0.0)
 	{
-		Component->SetCullDistances(FMath::RoundToInt32(CullDistance * 0.8), FMath::RoundToInt32(CullDistance));
+		const double Scaled = CullDistance * LiminalBiomeDetail::GetScatterCullScale();
+		Component->SetCullDistances(FMath::RoundToInt32(Scaled * 0.8), FMath::RoundToInt32(Scaled));
 	}
 	Component->SetupAttachment(Root);
 	Component->RegisterComponent();
 	Component->AddInstances(Instances, false, false, false);
 	ScatterComponents.Add(Component);
+	ScatterCullDistances.Add(CullDistance);
 
 	const int64 Triangles = Mesh->GetNumTriangles(0);
 	ScatterInstanceCount += Instances.Num();
@@ -375,6 +419,20 @@ void ALiminalBiome::AddScatterComponent(ELiminalScatterCategory Category, int32 
 		{
 			++NearInstanceCount;
 			NearTriangleCount += Triangles;
+		}
+	}
+}
+
+void ALiminalBiome::ApplyScatterCullScale(float Scale)
+{
+	for (int32 Index = 0; Index < ScatterComponents.Num() && Index < ScatterCullDistances.Num(); ++Index)
+	{
+		UHierarchicalInstancedStaticMeshComponent* Component = ScatterComponents[Index];
+		const double CullDistance = ScatterCullDistances[Index];
+		if (Component && CullDistance > 0.0)
+		{
+			const double Scaled = CullDistance * Scale;
+			Component->SetCullDistances(FMath::RoundToInt32(Scaled * 0.8), FMath::RoundToInt32(Scaled));
 		}
 	}
 }

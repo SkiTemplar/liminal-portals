@@ -126,16 +126,18 @@ namespace
 		int32 MeasureFrames = Defaults.MeasureFrames;
 		int32 WarmupFrames = Defaults.WarmupFrames;
 		const bool bParsed = (Args.Num() < 1 || LexTryParseString(MeasureFrames, *Args[0]))
-			&& (Args.Num() < 2 || LexTryParseString(WarmupFrames, *Args[1]));
+			&& (Args.Num() < 2 || LexTryParseString(WarmupFrames, *Args[1]))
+			&& (Args.Num() < 3 || Args[2].Equals(TEXT("profile"), ESearchCase::IgnoreCase));
+		const bool bProfile = Args.Num() >= 3;
 		if (!bParsed)
 		{
-			FailCommandStart(TEXT("Liminal.Bench"), TEXT("uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento]"),
+			FailCommandStart(TEXT("Liminal.Bench"), TEXT("uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento] [profile]"),
 				IsInProgress(GBenchRun));
 			return;
 		}
 		FString Error;
 		const bool bInProgress = IsInProgress(GBenchRun);
-		if (!LiminalDebugCommands::StartBench(World, MeasureFrames, WarmupFrames, Error))
+		if (!LiminalDebugCommands::StartBench(World, MeasureFrames, WarmupFrames, bProfile, Error))
 		{
 			FailCommandStart(TEXT("Liminal.Bench"), Error, bInProgress);
 		}
@@ -144,7 +146,8 @@ namespace
 	FAutoConsoleCommandWithWorldAndArgs BenchCommand(
 		TEXT("Liminal.Bench"),
 		TEXT("Mide en L_Hub el tiempo de GPU, render thread y game thread con 0, 1, 2 y 4 portales visibles y con los ")
-		TEXT("portales apagados; escribe Saved/Bench.json y sale. Uso: Liminal.Bench [Medidos >= 120] [Calentamiento >= 60]"),
+		TEXT("portales apagados; escribe Saved/Bench.json y sale. Con profile, también el desglose de GPU por pase y el ")
+		TEXT("recorrido del hub en Saved/BenchProfile.json. Uso: Liminal.Bench [Medidos >= 120] [Calentamiento >= 60] [profile]"),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunBenchCommand));
 
 	FAutoConsoleCommandWithWorldAndArgs SelfTestCommand(
@@ -280,7 +283,7 @@ namespace LiminalDebugCommands
 		return true;
 	}
 
-	bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, FString& OutError)
+	bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, bool bProfile, FString& OutError)
 	{
 		if (GBenchRun && !GBenchRun->IsFinished())
 		{
@@ -306,6 +309,16 @@ namespace LiminalDebugCommands
 		Config.MeasureFrames = MeasureFrames;
 		Config.WarmupFrames = WarmupFrames;
 		Config.MaxTotalFrames = 5 * (2 * MeasureFrames + WarmupFrames + 600) + Config.FirstCaseExtraWarmup + 1000;
+		Config.bProfile = bProfile;
+		Config.ProfileOutputPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BenchProfile.json")));
+		if (bProfile)
+		{
+			// Recorrido: todas las poses de LiminalBenchMath::MakeHubWalkPoses, HoldFrames fotogramas cada una.
+			Config.MaxTotalFrames += LiminalBenchMath::MakeHubWalkPoses().Num() * FLiminalBenchWalk::HoldFrames + 100;
+			// Cruces: cuatro puertas con la espera a 300 fps como mucho y la caminata.
+			Config.MaxTotalFrames += 4 * FLiminalBenchCrossing::Passes * (static_cast<int32>(FLiminalBenchCrossing::HoldSeconds * 300.0)
+				+ FLiminalBenchCrossing::MaxWalkFrames + 50);
+		}
 
 		GBenchRun.Reset();
 		TUniquePtr<FLiminalBenchRun> Run = MakeUnique<FLiminalBenchRun>(GameWorld, Config);

@@ -129,6 +129,10 @@ protected:
 	 */
 	virtual void BuildProceduralContent(FRandomStream& Stream);
 
+public:
+	/** Experimento de coste (D-36): distancias de corte de la dispersión por Scale (las categorías sin corte no cambian). */
+	void ApplyScatterCullScale(float Scale);
+
 private:
 	void Rebuild();
 	void DestroyProceduralComponents();
@@ -158,6 +162,9 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> ScatterComponents;
+
+	/** Distancia de corte del catálogo de cada componente de ScatterComponents (0 = sin corte). */
+	TArray<double> ScatterCullDistances;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> CubeMesh;

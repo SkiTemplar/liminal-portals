@@ -124,4 +124,84 @@ namespace LiminalBenchMath
 		}
 		return Count;
 	}
+
+	TArray<FBenchPose> MakeHubWalkPoses()
+	{
+		constexpr double FirstX = -650.0;
+		constexpr double StepX = 250.0;
+		constexpr int32 NumX = 6;
+		constexpr double Ys[] = { -150.0, 0.0, 150.0 };
+		constexpr int32 NumYaws = 12;
+		TArray<FBenchPose> Poses;
+		Poses.Reserve(NumX * UE_ARRAY_COUNT(Ys) * NumYaws);
+		for (int32 IndexX = 0; IndexX < NumX; ++IndexX)
+		{
+			for (const double Y : Ys)
+			{
+				for (int32 IndexYaw = 0; IndexYaw < NumYaws; ++IndexYaw)
+				{
+					FBenchPose& Pose = Poses.AddDefaulted_GetRef();
+					const double X = FirstX + StepX * IndexX;
+					const double Yaw = 360.0 * IndexYaw / NumYaws;
+					Pose.Name = FString::Printf(TEXT("walk_%.0f_%.0f_%.0f"), X, Y, Yaw);
+					Pose.Feet = FVector2D(X, Y);
+					Pose.Yaw = Yaw;
+					Pose.ExpectedCaptures = -1;
+				}
+			}
+		}
+		return Poses;
+	}
+
+	double ComputeScreenRectFraction(TConstArrayView<FVector> Corners, const FVector& ViewLocation,
+		const FRotator& ViewRotation, float HorizontalFOVDegrees, float AspectRatio, double NearPlane)
+	{
+		const bool bValidView = HorizontalFOVDegrees > 0.f && HorizontalFOVDegrees < 180.f && AspectRatio > UE_KINDA_SMALL_NUMBER
+			&& NearPlane > 0.0;
+		if (!bValidView || Corners.Num() < 3)
+		{
+			return 0.0;
+		}
+
+		// Espacio de cámara de UE: X adelante, Y derecha, Z arriba.
+		TArray<FVector, TInlineAllocator<8>> Local;
+		for (const FVector& Corner : Corners)
+		{
+			Local.Add(ViewRotation.UnrotateVector(Corner - ViewLocation));
+		}
+
+		// Sutherland-Hodgman contra el plano X = NearPlane.
+		TArray<FVector, TInlineAllocator<8>> Clipped;
+		for (int32 Index = 0; Index < Local.Num(); ++Index)
+		{
+			const FVector& Current = Local[Index];
+			const FVector& Next = Local[(Index + 1) % Local.Num()];
+			const bool bCurrentIn = Current.X >= NearPlane;
+			const bool bNextIn = Next.X >= NearPlane;
+			if (bCurrentIn)
+			{
+				Clipped.Add(Current);
+			}
+			if (bCurrentIn != bNextIn)
+			{
+				const double T = (NearPlane - Current.X) / (Next.X - Current.X);
+				Clipped.Add(FMath::Lerp(Current, Next, T));
+			}
+		}
+		if (Clipped.Num() < 3)
+		{
+			return 0.0;
+		}
+
+		const double TanHalfHorizontal = FMath::Tan(FMath::DegreesToRadians(static_cast<double>(HorizontalFOVDegrees)) * 0.5);
+		const double TanHalfVertical = TanHalfHorizontal / AspectRatio;
+		FBox2D Rect(ForceInit);
+		for (const FVector& Point : Clipped)
+		{
+			Rect += FVector2D(Point.Y / (Point.X * TanHalfHorizontal), Point.Z / (Point.X * TanHalfVertical));
+		}
+		const double Width = FMath::Max(FMath::Min(Rect.Max.X, 1.0) - FMath::Max(Rect.Min.X, -1.0), 0.0);
+		const double Height = FMath::Max(FMath::Min(Rect.Max.Y, 1.0) - FMath::Max(Rect.Min.Y, -1.0), 0.0);
+		return Width * Height / 4.0;
+	}
 }

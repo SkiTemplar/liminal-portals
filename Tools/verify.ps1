@@ -18,9 +18,14 @@
 #               último queda en Saved/Bench.json). Falla si algún caso no tiene las capturas esperadas;
 #               avisa si el coste por portal difiere un 25 % o más entre ejecuciones. Resumen en
 #               Saved/BenchResult.json.
-#   -ExecCmds   Órdenes de consola extra antes de la verificación (p. ej. 'r.AntiAliasingMethod 1').
+#   -Profile    Con -Bench (D-36): Liminal.Bench en modo perfil. Además de los tiempos, el desglose de GPU por pase
+#               de cada caso, separando la vista principal de cada captura, y el recorrido del hub (capturas por
+#               fotograma, superficies dibujadas y área en pantalla de los portales). Saved/BenchProfile.json (y
+#               BenchProfile_run<N>.json); Tools/Verify/summarize_profile.py lo resume en BenchProfileSummary.json.
+#   -BenchRuns  Ejecuciones de -Bench (2 por defecto; con 1 no se comprueba la estabilidad).
+#   -ExecCmds  Órdenes de consola extra antes de la verificación (p. ej. 'r.AntiAliasingMethod 1').
 #
-# Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-Bench] [-ExecCmds '...']
+# Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-Bench [-Profile]] [-ExecCmds '...']
 param(
     [switch]$Calibrate,
     [switch]$ClipPlaneCheck,
@@ -28,6 +33,8 @@ param(
     [switch]$SelfTestNegative,
     [switch]$Tour,
     [switch]$Bench,
+    [switch]$Profile,
+    [ValidateRange(1, 10)] [int]$BenchRuns = 2,
     [string]$ExecCmds = '',
     [int]$SelfTestCycles = 20,
     [int]$TimeoutMinutes = 45,
@@ -184,22 +191,38 @@ function Get-RelativeDifference([double]$A, [double]$B) {
     return [Math]::Abs($A - $B) / $scale
 }
 
-function Invoke-BenchRun([int]$Run, [int]$Width, [int]$Height, [string[]]$ExtraCommands) {
+# Modo perfil: guarda el informe de la ejecución y lo resume (vista principal frente a capturas, recorrido).
+function Invoke-ProfileSummary([int]$Run, [string]$ProfileReport, [string]$LogPath) {
+    if (-not (Test-Path $ProfileReport)) { throw "Liminal.Bench profile no escribió $ProfileReport (log: $LogPath)" }
+    $runReport = Join-Path $ProjectRoot "Saved\BenchProfile_run$Run.json"
+    Copy-Item $ProfileReport $runReport -Force
+    $summarize = Join-Path $ProjectRoot 'Tools\Verify\summarize_profile.py'
+    $summary = Join-Path $ProjectRoot "Saved\BenchProfileSummary_run$Run.json"
+    $env:PYTHONIOENCODING = 'utf-8'
+    $code = Invoke-Native 'uv' @('run', '--no-project', 'python', $summarize, '--profile', $runReport, '--out', $summary) '.'
+    if ($code -ne 0) { throw "No se pudo resumir $runReport (código $code)" }
+    Copy-Item $summary (Join-Path $ProjectRoot 'Saved\BenchProfileSummary.json') -Force
+}
+
+function Invoke-BenchRun([int]$Run,[int]$Width, [int]$Height, [string[]]$ExtraCommands) {
     $report = Join-Path $ProjectRoot 'Saved\Bench.json'
-    if (Test-Path $report) { Remove-Item $report -Force }
-    $commands = @($ExtraCommands) + @('r.VSync 0', 't.MaxFPS 0', "Liminal.Bench $BenchFrames $BenchWarmup")
+    $profileReport = Join-Path $ProjectRoot 'Saved\BenchProfile.json'
+    foreach ($stale in $report, $profileReport) { if (Test-Path $stale) { Remove-Item $stale -Force } }
+    $benchCommand = "Liminal.Bench $BenchFrames $BenchWarmup" + $(if ($Profile) { ' profile' } else { '' })
+    $commands = @($ExtraCommands) + @('r.VSync 0', 't.MaxFPS 0', $benchCommand)
     $logPath = Invoke-GameRun $HubMap $commands "Bench_run$Run" @() $Width $Height
     if (-not (Test-Path $report)) { throw "Liminal.Bench no escribió $report (log: $logPath)" }
     Copy-Item $report (Join-Path $ProjectRoot "Saved\Bench_run$Run.json") -Force
+    if ($Profile) { Invoke-ProfileSummary $Run $profileReport $logPath }
 
     $data = Get-Content $report -Raw -Encoding UTF8 | ConvertFrom-Json
     Write-Host ("   {0}, {1}, viewport {2}x{3}, render target {4}x{5}, r.VSync {6}, t.MaxFPS {7}" -f $data.gpu, $data.rhi,
         $data.viewport[0], $data.viewport[1], $data.renderTarget[0], $data.renderTarget[1], $data.cvars.'r.VSync', $data.cvars.'t.MaxFPS')
     foreach ($case in $data.cases) {
         $mark = if ($case.capturesOk) { 'OK  ' } else { 'FAIL' }
-        Write-Host ("{0} {1,-18} capturas {2}-{3} (esperadas {4}); GPU media {5:N3} p50 {6:N3} p95 {7:N3} ms; RT {8:N3} ms; GT {9:N3} ms" -f $mark,
+        Write-Host ("{0} {1,-18} capturas {2}-{3} (esperadas {4}); GPU media {5:N3} p50 {6:N3} p95 {7:N3} ms; RT {8:N3} ms; GT {9:N3} ms; RHI {10:N3} ms; {11:N1} fps" -f $mark,
             $case.name, $case.minCaptures, $case.maxCaptures, $case.expectedCaptures, $case.gpuMs.mean, $case.gpuMs.p50,
-            $case.gpuMs.p95, $case.renderThreadMs.mean, $case.gameThreadMs.mean)
+            $case.gpuMs.p95, $case.renderThreadMs.mean, $case.gameThreadMs.mean, $case.rhiThreadMs.mean, (1000.0 / [Math]::Max($case.frameMs.mean, 1e-6)))
     }
     $failed = @($data.cases | Where-Object { -not $_.capturesOk }).Count
     if (-not $data.complete -or @($data.cases).Count -ne 5 -or $failed -gt 0) {
@@ -220,7 +243,12 @@ function Invoke-Bench([string[]]$ExtraCommands) {
         Write-Host "La pantalla principal ($($bounds.Width)x$($bounds.Height)) no admite ${BenchResX}x${BenchResY} en ventana: se mide a ${width}x${height}"
     }
     $runs = @()
-    foreach ($run in 1, 2) { $runs += Invoke-BenchRun $run $width $height $ExtraCommands }
+    foreach ($run in 1..$BenchRuns) { $runs += Invoke-BenchRun $run $width $height $ExtraCommands }
+    if ($BenchRuns -lt 2) {
+        Write-Host ("Bench: coste por portal {0:N3} ms; pendiente {1:N3} ms (una ejecución: sin comprobación de estabilidad)" -f `
+            $runs[0].perPortal.gpuMsPaired, $runs[0].perPortal.gpuMsSlope)
+        return
+    }
 
     $first = $runs[0].perPortal; $second = $runs[1].perPortal
     $diffPaired = Get-RelativeDifference $first.gpuMsPaired $second.gpuMsPaired
@@ -247,6 +275,7 @@ function Invoke-Bench([string[]]$ExtraCommands) {
 
 if ($ClipPlaneCheck -and -not $Calibrate) { throw '-ClipPlaneCheck solo vale con -Calibrate.' }
 if ($SelfTestNegative -and -not $SelfTest) { throw '-SelfTestNegative solo vale con -SelfTest.' }
+if ($Profile -and -not $Bench) { throw '-Profile solo vale con -Bench.' }
 if (-not ($Calibrate -or $SelfTest -or $Tour -or $Bench)) {
     Write-Output 'Nada que verificar: usa -Calibrate, -SelfTest, -Tour o -Bench.'
     exit 0
