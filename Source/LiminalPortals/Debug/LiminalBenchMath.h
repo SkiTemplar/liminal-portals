@@ -89,4 +89,26 @@ namespace LiminalBenchMath
 	 */
 	LIMINALPORTALS_API double ComputeScreenRectFraction(TConstArrayView<FVector> Corners, const FVector& ViewLocation,
 		const FRotator& ViewRotation, float HorizontalFOVDegrees, float AspectRatio, double NearPlane = 10.0);
+
+	/**
+	 * Giro de los cruces del modo perfil (D-36): yaw tras Frame fotogramas de un giro suave (smoothstep) de
+	 * TotalDegrees grados repartido en TurnFrames fotogramas, como un jugador que se da la vuelta.
+	 * Frame se recorta a [0, TurnFrames]; con TurnFrames <= 0 el giro es instantáneo (StartYaw + TotalDegrees).
+	 */
+	LIMINALPORTALS_API double ComputeTurnYaw(double StartYaw, double TotalDegrees, int32 Frame, int32 TurnFrames);
+
+	/** Pico de una ventana de tiempos de fotograma. */
+	struct FSpike
+	{
+		/** Índice del máximo en la ventana; INDEX_NONE si está vacía. */
+		int32 Index = INDEX_NONE;
+		double MaxMs = 0.0;
+		/** Mediana de la ventana: la referencia del pico. */
+		double MedianMs = 0.0;
+		/** MaxMs / MedianMs; 0 si la ventana está vacía o la mediana es 0. */
+		double Ratio = 0.0;
+	};
+
+	/** Máximo de Values, su índice (el primero si se repite) y su cociente frente a la mediana de la propia ventana. */
+	LIMINALPORTALS_API FSpike FindSpike(TConstArrayView<double> Values);
 }

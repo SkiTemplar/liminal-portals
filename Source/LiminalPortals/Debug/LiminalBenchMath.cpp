@@ -204,4 +204,34 @@ namespace LiminalBenchMath
 		const double Height = FMath::Max(FMath::Min(Rect.Max.Y, 1.0) - FMath::Max(Rect.Min.Y, -1.0), 0.0);
 		return Width * Height / 4.0;
 	}
+
+	double ComputeTurnYaw(double StartYaw, double TotalDegrees, int32 Frame, int32 TurnFrames)
+	{
+		if (TurnFrames <= 0)
+		{
+			return StartYaw + TotalDegrees;
+		}
+		const double Alpha = FMath::Clamp(static_cast<double>(Frame) / TurnFrames, 0.0, 1.0);
+		return StartYaw + TotalDegrees * Alpha * Alpha * (3.0 - 2.0 * Alpha);
+	}
+
+	FSpike FindSpike(TConstArrayView<double> Values)
+	{
+		FSpike Spike;
+		for (int32 Index = 0; Index < Values.Num(); ++Index)
+		{
+			if (Spike.Index == INDEX_NONE || Values[Index] > Spike.MaxMs)
+			{
+				Spike.Index = Index;
+				Spike.MaxMs = Values[Index];
+			}
+		}
+		if (Spike.Index == INDEX_NONE)
+		{
+			return Spike;
+		}
+		Spike.MedianMs = ComputeStats(Values).P50;
+		Spike.Ratio = Spike.MedianMs > 0.0 ? Spike.MaxMs / Spike.MedianMs : 0.0;
+		return Spike;
+	}
 }

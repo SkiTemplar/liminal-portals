@@ -20,6 +20,13 @@ namespace LiminalBenchCrossingDetail
 	constexpr int32 GpuLagFrames = 3;
 	/** Muestras de GPU que se guardan (ventana + retraso). */
 	constexpr int32 GpuSamples = FLiminalBenchCrossing::WindowBefore + FLiminalBenchCrossing::WindowAfter + GpuLagFrames;
+	/** Muestras de GPU que se guardan del giro. */
+	constexpr int32 TurnGpuSamples = FLiminalBenchCrossing::TurnWindow + GpuLagFrames;
+
+	bool HasReturnState(const ALiminalPortal& Portal)
+	{
+		return Portal.LinkedPortal && Portal.LinkedPortal->HasCaptureState();
+	}
 
 	TArray<TSharedPtr<FJsonValue>> ToJsonNumbers(TConstArrayView<double> Values)
 	{
@@ -81,6 +88,7 @@ void FLiminalBenchCrossing::NextDoor()
 {
 	History.Reset();
 	bRecordingGpu = false;
+	bRecordingTurnGpu = false;
 	Step = EStep::Place;
 	bFinished = ++DoorIndex >= Doors.Num();
 }
@@ -91,9 +99,9 @@ void FLiminalBenchCrossing::AddGpuSample(double Milliseconds)
 	{
 		return;
 	}
-	TArray<double>& Gpu = Results.Last().GpuMs;
+	TArray<double>& Gpu = bRecordingTurnGpu ? Results.Last().TurnGpuMs : Results.Last().GpuMs;
 	Gpu.Add(Milliseconds);
-	if (Gpu.Num() > LiminalBenchCrossingDetail::GpuSamples)
+	if (Gpu.Num() > (bRecordingTurnGpu ? LiminalBenchCrossingDetail::TurnGpuSamples : LiminalBenchCrossingDetail::GpuSamples))
 	{
 		Gpu.RemoveAt(0);
 	}
@@ -149,6 +157,8 @@ void FLiminalBenchCrossing::Tick(float DeltaTime, APlayerController* Controller,
 		{
 			FDoor& Door = Results.Last();
 			Door.bCrossed = true;
+			Door.ReturnPortal = Portal->LinkedPortal ? Portal->LinkedPortal->GetName() : FString();
+			Door.bReturnHadStateAtCross = LiminalBenchCrossingDetail::HasReturnState(*Portal);
 			const int32 First = FMath::Max(History.Num() - WindowBefore - 1, 0);
 			Door.Frames.Append(&History[First], History.Num() - First);
 			Step = EStep::After;
@@ -170,14 +180,88 @@ void FLiminalBenchCrossing::Tick(float DeltaTime, APlayerController* Controller,
 		if (++StepFrames >= WindowAfter + LiminalBenchCrossingDetail::GpuLagFrames)
 		{
 			Controller->SetIgnoreMoveInput(true);
-			NextDoor();
+			BeginTurn(*Controller, *Portal);
 		}
+		break;
+	case EStep::Turn:
+		TickTurn(Frame, *Controller, *Portal);
 		break;
 	}
 	if (History.Num() > WindowBefore + 1)
 	{
 		History.RemoveAt(0);
 	}
+}
+
+void FLiminalBenchCrossing::BeginTurn(APlayerController& Controller, const ALiminalPortal& Portal)
+{
+	FDoor& Door = Results.Last();
+	Door.bReturnHadStateBeforeTurn = LiminalBenchCrossingDetail::HasReturnState(Portal);
+	TurnStartYaw = Controller.GetControlRotation().Yaw;
+	bRecordingTurnGpu = true;
+	Step = EStep::Turn;
+	StepFrames = 0;
+	// Primer paso del giro ya en este fotograma: el siguiente Tick mide el fotograma que lo dibuja.
+	Controller.SetControlRotation(FRotator(0.0, LiminalBenchMath::ComputeTurnYaw(TurnStartYaw, TurnDegrees, 1, TurnFrames), 0.0));
+}
+
+void FLiminalBenchCrossing::TickTurn(const FFrame& Frame, APlayerController& Controller, const ALiminalPortal& Portal)
+{
+	FDoor& Door = Results.Last();
+	if (StepFrames < TurnWindow)
+	{
+		Door.TurnFrames.Add(Frame);
+	}
+	if (Door.ReturnStateFrame == INDEX_NONE && !Door.bReturnHadStateBeforeTurn && LiminalBenchCrossingDetail::HasReturnState(Portal))
+	{
+		Door.ReturnStateFrame = StepFrames;
+	}
+	++StepFrames;
+	if (StepFrames < TurnFrames)
+	{
+		Controller.SetControlRotation(FRotator(0.0,
+			LiminalBenchMath::ComputeTurnYaw(TurnStartYaw, TurnDegrees, StepFrames + 1, TurnFrames), 0.0));
+	}
+	if (StepFrames >= TurnWindow + LiminalBenchCrossingDetail::GpuLagFrames)
+	{
+		NextDoor();
+	}
+}
+
+TSharedRef<FJsonObject> FLiminalBenchCrossing::TurnToJson(const FDoor& Door)
+{
+	using namespace LiminalBenchCrossingDetail;
+	TArray<double> FrameMs;
+	TArray<double> RenderMs;
+	TArray<double> GameMs;
+	TArray<double> Captures;
+	for (const FFrame& Frame : Door.TurnFrames)
+	{
+		FrameMs.Add(Frame.FrameMs);
+		RenderMs.Add(Frame.RenderThreadMs);
+		GameMs.Add(Frame.GameThreadMs);
+		Captures.Add(Frame.Captures);
+	}
+	const LiminalBenchMath::FSpike Spike = LiminalBenchMath::FindSpike(FrameMs);
+	const TSharedRef<FJsonObject> Turn = MakeShared<FJsonObject>();
+	Turn->SetStringField(TEXT("returnPortal"), Door.ReturnPortal);
+	Turn->SetBoolField(TEXT("returnHadStateAtCross"), Door.bReturnHadStateAtCross);
+	Turn->SetBoolField(TEXT("returnHadStateBeforeTurn"), Door.bReturnHadStateBeforeTurn);
+	Turn->SetNumberField(TEXT("returnStateFrame"), Door.ReturnStateFrame);
+	Turn->SetNumberField(TEXT("frames"), FrameMs.Num());
+	Turn->SetNumberField(TEXT("frameMsMedian"), Spike.MedianMs);
+	Turn->SetNumberField(TEXT("frameMsMax"), Spike.MaxMs);
+	Turn->SetNumberField(TEXT("frameMsMaxIndex"), Spike.Index);
+	Turn->SetNumberField(TEXT("spikeRatio"), Spike.Ratio);
+	Turn->SetNumberField(TEXT("gpuMsMax"), MaxOf(Door.TurnGpuMs));
+	Turn->SetNumberField(TEXT("renderThreadMsMax"), MaxOf(RenderMs));
+	Turn->SetNumberField(TEXT("gameThreadMsMax"), MaxOf(GameMs));
+	Turn->SetArrayField(TEXT("frameMs"), ToJsonNumbers(FrameMs));
+	Turn->SetArrayField(TEXT("gpuMs"), ToJsonNumbers(Door.TurnGpuMs));
+	Turn->SetArrayField(TEXT("renderThreadMs"), ToJsonNumbers(RenderMs));
+	Turn->SetArrayField(TEXT("gameThreadMs"), ToJsonNumbers(GameMs));
+	Turn->SetArrayField(TEXT("captures"), ToJsonNumbers(Captures));
+	return Turn;
 }
 
 TSharedRef<FJsonObject> FLiminalBenchCrossing::ToJson() const
@@ -187,6 +271,8 @@ TSharedRef<FJsonObject> FLiminalBenchCrossing::ToJson() const
 	double WorstFrame = 0.0;
 	double WorstGpu = 0.0;
 	double WorstRatio = 0.0;
+	double WorstTurnFrame = 0.0;
+	double WorstTurnRatio = 0.0;
 	for (const FDoor& Door : Results)
 	{
 		TArray<double> FrameMs;
@@ -227,6 +313,10 @@ TSharedRef<FJsonObject> FLiminalBenchCrossing::ToJson() const
 		Entry->SetArrayField(TEXT("renderThreadMs"), ToJsonNumbers(RenderMs));
 		Entry->SetArrayField(TEXT("gameThreadMs"), ToJsonNumbers(GameMs));
 		Entry->SetArrayField(TEXT("captures"), ToJsonNumbers(Captures));
+		const TSharedRef<FJsonObject> Turn = TurnToJson(Door);
+		WorstTurnFrame = FMath::Max(WorstTurnFrame, Turn->GetNumberField(TEXT("frameMsMax")));
+		WorstTurnRatio = FMath::Max(WorstTurnRatio, Turn->GetNumberField(TEXT("spikeRatio")));
+		Entry->SetObjectField(TEXT("turn"), Turn);
 		DoorValues.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 	const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
@@ -236,6 +326,11 @@ TSharedRef<FJsonObject> FLiminalBenchCrossing::ToJson() const
 	Object->SetNumberField(TEXT("frameMsMaxFromCross"), WorstFrame);
 	Object->SetNumberField(TEXT("gpuMsMax"), WorstGpu);
 	Object->SetNumberField(TEXT("spikeRatioMax"), WorstRatio);
+	Object->SetNumberField(TEXT("turnDegrees"), TurnDegrees);
+	Object->SetNumberField(TEXT("turnFrames"), TurnFrames);
+	Object->SetNumberField(TEXT("turnWindow"), TurnWindow);
+	Object->SetNumberField(TEXT("turnFrameMsMax"), WorstTurnFrame);
+	Object->SetNumberField(TEXT("turnSpikeRatioMax"), WorstTurnRatio);
 	Object->SetStringField(TEXT("error"), Error);
 	Object->SetArrayField(TEXT("doors"), DoorValues);
 	return Object;

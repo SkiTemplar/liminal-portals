@@ -127,17 +127,19 @@ namespace
 		int32 WarmupFrames = Defaults.WarmupFrames;
 		const bool bParsed = (Args.Num() < 1 || LexTryParseString(MeasureFrames, *Args[0]))
 			&& (Args.Num() < 2 || LexTryParseString(WarmupFrames, *Args[1]))
-			&& (Args.Num() < 3 || Args[2].Equals(TEXT("profile"), ESearchCase::IgnoreCase));
-		const bool bProfile = Args.Num() >= 3;
+			&& (Args.Num() < 3 || Args[2].Equals(TEXT("profile"), ESearchCase::IgnoreCase)
+				|| Args[2].Equals(TEXT("cross"), ESearchCase::IgnoreCase));
+		const bool bCrossOnly = Args.Num() >= 3 && Args[2].Equals(TEXT("cross"), ESearchCase::IgnoreCase);
+		const bool bProfile = Args.Num() >= 3 && !bCrossOnly;
 		if (!bParsed)
 		{
-			FailCommandStart(TEXT("Liminal.Bench"), TEXT("uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento] [profile]"),
+			FailCommandStart(TEXT("Liminal.Bench"), TEXT("uso Liminal.Bench [FotogramasMedidos] [FotogramasDeCalentamiento] [profile|cross]"),
 				IsInProgress(GBenchRun));
 			return;
 		}
 		FString Error;
 		const bool bInProgress = IsInProgress(GBenchRun);
-		if (!LiminalDebugCommands::StartBench(World, MeasureFrames, WarmupFrames, bProfile, Error))
+		if (!LiminalDebugCommands::StartBench(World, MeasureFrames, WarmupFrames, bProfile, Error, bCrossOnly))
 		{
 			FailCommandStart(TEXT("Liminal.Bench"), Error, bInProgress);
 		}
@@ -147,7 +149,8 @@ namespace
 		TEXT("Liminal.Bench"),
 		TEXT("Mide en L_Hub el tiempo de GPU, render thread y game thread con 0, 1, 2 y 4 portales visibles y con los ")
 		TEXT("portales apagados; escribe Saved/Bench.json y sale. Con profile, también el desglose de GPU por pase y el ")
-		TEXT("recorrido del hub en Saved/BenchProfile.json. Uso: Liminal.Bench [Medidos >= 120] [Calentamiento >= 60] [profile]"),
+		TEXT("recorrido del hub en Saved/BenchProfile.json. Con cross, solo los cruces por las puertas y el giro tras cada uno ")
+		TEXT("en Saved/BenchCross.json. Uso: Liminal.Bench [Medidos >= 120] [Calentamiento >= 60] [profile|cross]"),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunBenchCommand));
 
 	FAutoConsoleCommandWithWorldAndArgs SelfTestCommand(
@@ -283,7 +286,7 @@ namespace LiminalDebugCommands
 		return true;
 	}
 
-	bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, bool bProfile, FString& OutError)
+	bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, bool bProfile, FString& OutError, bool bCrossOnly)
 	{
 		if (GBenchRun && !GBenchRun->IsFinished())
 		{
@@ -311,13 +314,20 @@ namespace LiminalDebugCommands
 		Config.MaxTotalFrames = 5 * (2 * MeasureFrames + WarmupFrames + 600) + Config.FirstCaseExtraWarmup + 1000;
 		Config.bProfile = bProfile;
 		Config.ProfileOutputPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BenchProfile.json")));
-		if (bProfile)
+		Config.bCrossOnly = bCrossOnly;
+		Config.CrossOutputPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BenchCross.json")));
+		// Cruces: cuatro puertas con la espera a 300 fps como mucho, la caminata, la ventana posterior y el giro.
+		const int32 CrossingFrames = 4 * FLiminalBenchCrossing::Passes * (static_cast<int32>(FLiminalBenchCrossing::HoldSeconds * 300.0)
+			+ FLiminalBenchCrossing::MaxWalkFrames + FLiminalBenchCrossing::WindowAfter + FLiminalBenchCrossing::TurnWindow + 50);
+		if (bCrossOnly)
+		{
+			Config.MaxTotalFrames = CrossingFrames + 1000;
+		}
+		else if (bProfile)
 		{
 			// Recorrido: todas las poses de LiminalBenchMath::MakeHubWalkPoses, HoldFrames fotogramas cada una.
 			Config.MaxTotalFrames += LiminalBenchMath::MakeHubWalkPoses().Num() * FLiminalBenchWalk::HoldFrames + 100;
-			// Cruces: cuatro puertas con la espera a 300 fps como mucho y la caminata.
-			Config.MaxTotalFrames += 4 * FLiminalBenchCrossing::Passes * (static_cast<int32>(FLiminalBenchCrossing::HoldSeconds * 300.0)
-				+ FLiminalBenchCrossing::MaxWalkFrames + 50);
+			Config.MaxTotalFrames += CrossingFrames;
 		}
 
 		GBenchRun.Reset();

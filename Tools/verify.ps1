@@ -22,10 +22,13 @@
 #               de cada caso, separando la vista principal de cada captura, y el recorrido del hub (capturas por
 #               fotograma, superficies dibujadas y área en pantalla de los portales). Saved/BenchProfile.json (y
 #               BenchProfile_run<N>.json); Tools/Verify/summarize_profile.py lo resume en BenchProfileSummary.json.
+#   -BenchCross Solo los cruces del modo perfil, sin casos, recorrido ni perfilador (unos 2 min): Liminal.Bench … cross
+#               a la resolución de -Bench. Por puerta y pasada, el pico al cruzar y el del giro de 180° hacia la puerta
+#               de vuelta, con el estado de render que tenía esa puerta (D-31). Saved/BenchCross.json.
 #   -BenchRuns  Ejecuciones de -Bench (2 por defecto; con 1 no se comprueba la estabilidad).
 #   -ExecCmds  Órdenes de consola extra antes de la verificación (p. ej. 'r.AntiAliasingMethod 1').
 #
-# Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-Bench [-Profile]] [-ExecCmds '...']
+# Uso: powershell -File Tools/verify.ps1 [-Calibrate [-ClipPlaneCheck]] [-SelfTest] [-Tour] [-Bench [-Profile]] [-BenchCross] [-ExecCmds '...']
 param(
     [switch]$Calibrate,
     [switch]$ClipPlaneCheck,
@@ -34,6 +37,7 @@ param(
     [switch]$Tour,
     [switch]$Bench,
     [switch]$Profile,
+    [switch]$BenchCross,
     [ValidateRange(1, 10)] [int]$BenchRuns = 2,
     [string]$ExecCmds = '',
     [int]$SelfTestCycles = 20,
@@ -273,11 +277,30 @@ function Invoke-Bench([string[]]$ExtraCommands) {
         $first.gpuMsPaired, $second.gpuMsPaired, $diffPaired, $first.gpuMsSlope, $second.gpuMsSlope, $diffSlope, $verdict)
 }
 
+function Invoke-BenchCross([string[]]$ExtraCommands) {
+    $resolution = Get-BenchResolution
+    $report = Join-Path $ProjectRoot 'Saved\BenchCross.json'
+    if (Test-Path $report) { Remove-Item $report -Force }
+    $commands = @($ExtraCommands) + @('r.VSync 0', 't.MaxFPS 0', "Liminal.Bench $BenchFrames $BenchWarmup cross")
+    $logPath = Invoke-GameRun $HubMap $commands 'BenchCross' @() $resolution[0] $resolution[1]
+    if (-not (Test-Path $report)) { throw "Liminal.Bench cross no escribió $report (log: $logPath)" }
+    $data = Get-Content $report -Raw -Encoding UTF8 | ConvertFrom-Json
+    Write-Host ("   {0}, viewport {1}x{2}" -f $data.gpu, $data.viewport[0], $data.viewport[1])
+    foreach ($door in $data.crossings.doors) {
+        $turn = $door.turn
+        Write-Host ("{0,-22} pasada {1}: cruce {2:N1} ms (mediana antes {3:N1}, x{4:N1}); giro {5:N1} ms en el fotograma {6} (mediana {7:N1}, x{8:N1}, RT {9:N1} ms); vuelta {10}: estado al cruzar {11}, antes de girar {12}, recuperado en {13}" -f `
+            $door.portal, $door.pass, $door.frameMsMaxFromCross, $door.frameMsMedianBefore, $door.spikeRatio, $turn.frameMsMax,
+            $turn.frameMsMaxIndex, $turn.frameMsMedian, $turn.spikeRatio, $turn.renderThreadMsMax, $turn.returnPortal,
+            $turn.returnHadStateAtCross, $turn.returnHadStateBeforeTurn, $turn.returnStateFrame)
+    }
+    if (-not $data.complete) { throw "Liminal.Bench cross incompleto: $($data.error) (log: $logPath)" }
+}
+
 if ($ClipPlaneCheck -and -not $Calibrate) { throw '-ClipPlaneCheck solo vale con -Calibrate.' }
 if ($SelfTestNegative -and -not $SelfTest) { throw '-SelfTestNegative solo vale con -SelfTest.' }
 if ($Profile -and -not $Bench) { throw '-Profile solo vale con -Bench.' }
-if (-not ($Calibrate -or $SelfTest -or $Tour -or $Bench)) {
-    Write-Output 'Nada que verificar: usa -Calibrate, -SelfTest, -Tour o -Bench.'
+if (-not ($Calibrate -or $SelfTest -or $Tour -or $Bench -or $BenchCross)) {
+    Write-Output 'Nada que verificar: usa -Calibrate, -SelfTest, -Tour, -Bench o -BenchCross.'
     exit 0
 }
 
@@ -291,3 +314,4 @@ if ($SelfTest) {
 }
 if ($Tour) { Invoke-Tour $extraCommands }
 if ($Bench) { Invoke-Bench $extraCommands }
+if ($BenchCross) { Invoke-BenchCross $extraCommands }

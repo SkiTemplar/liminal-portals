@@ -245,3 +245,50 @@ bool FLiminalBenchScreenRectTest::RunTest(const FString& Parameters)
 		FVector::ZeroVector, FRotator::ZeroRotator, 90.f, Aspect), 0.0);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBenchTurnYawTest, "LiminalPortals.Bench.Turn.Yaw", BenchMathTestFlags)
+bool FLiminalBenchTurnYawTest::RunTest(const FString& Parameters)
+{
+	using namespace LiminalBenchMath;
+	// Positivos: empieza en StartYaw, pasa por la mitad a mitad del giro, acaba en StartYaw + 180 y es monótono.
+	TestNearlyEqual(TEXT("Inicio"), ComputeTurnYaw(30.0, 180.0, 0, 20), 30.0, 1e-9);
+	TestNearlyEqual(TEXT("Mitad"), ComputeTurnYaw(30.0, 180.0, 10, 20), 120.0, 1e-9);
+	TestNearlyEqual(TEXT("Final"), ComputeTurnYaw(30.0, 180.0, 20, 20), 210.0, 1e-9);
+	bool bMonotonic = true;
+	for (int32 Frame = 1; Frame <= 20; ++Frame)
+	{
+		bMonotonic &= ComputeTurnYaw(0.0, 180.0, Frame, 20) > ComputeTurnYaw(0.0, 180.0, Frame - 1, 20);
+	}
+	TestTrue(TEXT("Monótono"), bMonotonic);
+	// Suave: el primer paso es menor que el central (no arranca de golpe).
+	TestTrue(TEXT("Arranque suave"), ComputeTurnYaw(0.0, 180.0, 1, 20) < ComputeTurnYaw(0.0, 180.0, 11, 20) - ComputeTurnYaw(0.0, 180.0, 10, 20));
+
+	// Negativos: fotogramas fuera de rango se recortan y sin fotogramas el giro es instantáneo.
+	TestNearlyEqual(TEXT("Antes de empezar"), ComputeTurnYaw(30.0, 180.0, -5, 20), 30.0, 1e-9);
+	TestNearlyEqual(TEXT("Pasado el final"), ComputeTurnYaw(30.0, 180.0, 50, 20), 210.0, 1e-9);
+	TestNearlyEqual(TEXT("Sin fotogramas"), ComputeTurnYaw(30.0, 180.0, 0, 0), 210.0, 1e-9);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalBenchSpikeTest, "LiminalPortals.Bench.Turn.Spike", BenchMathTestFlags)
+bool FLiminalBenchSpikeTest::RunTest(const FString& Parameters)
+{
+	using namespace LiminalBenchMath;
+	// Positivo: un fotograma de 60 ms entre fotogramas de 6 ms.
+	const TArray<double> Window = { 6.0, 6.0, 7.0, 60.0, 6.0, 5.0, 6.0 };
+	const FSpike Spike = FindSpike(Window);
+	TestEqual(TEXT("Índice"), Spike.Index, 3);
+	TestNearlyEqual(TEXT("Máximo"), Spike.MaxMs, 60.0, 1e-9);
+	TestNearlyEqual(TEXT("Mediana"), Spike.MedianMs, 6.0, 1e-9);
+	TestNearlyEqual(TEXT("Cociente"), Spike.Ratio, 10.0, 1e-9);
+	// Empate: el primero.
+	TestEqual(TEXT("Empate"), FindSpike(TArray<double>{ 2.0, 9.0, 9.0 }).Index, 1);
+
+	// Negativos: ventana vacía y ventana de ceros (sin cociente).
+	const FSpike Empty = FindSpike(TArray<double>());
+	TestEqual(TEXT("Vacía: índice"), Empty.Index, static_cast<int32>(INDEX_NONE));
+	TestEqual(TEXT("Vacía: cociente"), Empty.Ratio, 0.0);
+	const FSpike Zeros = FindSpike(TArray<double>{ 0.0, 0.0 });
+	TestEqual(TEXT("Ceros: cociente"), Zeros.Ratio, 0.0);
+	return true;
+}

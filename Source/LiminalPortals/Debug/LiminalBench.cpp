@@ -211,6 +211,11 @@ void FLiminalBenchRun::UpdateWaitPawn()
 	Controller->SetIgnoreLookInput(true);
 	Controller->SetIgnoreMoveInput(true);
 	TeleportsAtStart = Subsystem->GetTeleportCount();
+	if (Config.bCrossOnly)
+	{
+		BeginCrossing();
+		return;
+	}
 	BeginCase(0);
 }
 
@@ -426,7 +431,17 @@ void FLiminalBenchRun::UpdateWalk()
 		Finish(TEXT("hubo un teletransporte durante el recorrido"));
 		return;
 	}
+	BeginCrossing();
+}
+
+void FLiminalBenchRun::BeginCrossing()
+{
 	Phase = EPhase::Cross;
+	SetPortalsEnabled(true);
+	uint64 Discarded = 0;
+	while (GpuHistory.PopFrameCycles(Discarded) != FRHIGPUFrameTimeHistory::EResult::Empty)
+	{
+	}
 	Crossing.Begin(World.Get(), HubTransform);
 	UE_LOG(LogLiminalPortals, Display, TEXT("Liminal.Bench: cruces por las puertas del hub (%.0f s de espera antes de cada uno)"),
 		FLiminalBenchCrossing::HoldSeconds);
@@ -469,6 +484,22 @@ void FLiminalBenchRun::Finish(const FString& Error)
 		Variable->Set(OriginalPortalsEnable, ECVF_SetByConsole);
 	}
 
+	if (Config.bCrossOnly)
+	{
+		if (WriteCrossReport(Error) && Error.IsEmpty())
+		{
+			UE_LOG(LogLiminalPortals, Display, TEXT("Liminal.Bench: cruces en %s"), *Config.CrossOutputPath);
+		}
+		else
+		{
+			UE_LOG(LogLiminalPortals, Error, TEXT("Liminal.Bench: cruces incompletos: %s"), *Error);
+		}
+		if (!GIsEditor)
+		{
+			FPlatformMisc::RequestExit(false, TEXT("Liminal.Bench"));
+		}
+		return;
+	}
 	bool bWritten = WriteReport(Error);
 	if (Config.bProfile)
 	{
@@ -673,4 +704,17 @@ bool FLiminalBenchRun::WriteProfileReport(const FString& Error) const
 	Root->SetObjectField(TEXT("walk"), Walk.ToJson());
 	Root->SetObjectField(TEXT("crossings"), Crossing.ToJson());
 	return SaveJson(Root, Config.ProfileOutputPath);
+}
+
+bool FLiminalBenchRun::WriteCrossReport(const FString& Error) const
+{
+	using namespace LiminalBenchDetail;
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetBoolField(TEXT("complete"), Error.IsEmpty() && Crossing.IsFinished());
+	Root->SetStringField(TEXT("error"), Error);
+	Root->SetStringField(TEXT("gpu"), GRHIAdapterName);
+	Root->SetArrayField(TEXT("viewport"), LiminalDebugShared::ToJsonArray({ static_cast<double>(Viewport.X), static_cast<double>(Viewport.Y) }));
+	Root->SetObjectField(TEXT("cvars"), CVarsToJson());
+	Root->SetObjectField(TEXT("crossings"), Crossing.ToJson());
+	return SaveJson(Root, Config.CrossOutputPath);
 }

@@ -25,11 +25,13 @@ namespace LiminalDebugCommands
 
 	/**
 	 * Liminal.Bench [Medidos] [Calentamiento] [profile]: tiempos de GPU y de CPU por caso en Saved/Bench.json;
-	 * con bProfile (D-36), además el desglose de GPU por pase y el recorrido del hub en Saved/BenchProfile.json.
+	 * con bProfile (D-36), además el desglose de GPU por pase y el recorrido del hub en Saved/BenchProfile.json;
+	 * con bCrossOnly, solo los cruces por las puertas y el giro tras cada uno en Saved/BenchCross.json.
 	 * @return false (con el motivo en OutError) si los fotogramas están fuera de rango (medidos >= 120,
 	 *         calentamiento >= 60), no hay mundo de juego o ya hay una medida en curso.
 	 */
-	LIMINALPORTALS_API bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, bool bProfile, FString& OutError);
+	LIMINALPORTALS_API bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, bool bProfile, FString& OutError,
+		bool bCrossOnly = false);
 
 	/** Liminal.Tour: capturas del hub y de cada puerta en Saved/Tour/. */
 	LIMINALPORTALS_API bool StartTour(UWorld* World, FString& OutError);

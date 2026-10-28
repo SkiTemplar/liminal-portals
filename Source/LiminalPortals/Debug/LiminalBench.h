@@ -43,6 +43,10 @@ public:
 		bool bProfile = false;
 		/** Ruta absoluta del informe del modo perfil. */
 		FString ProfileOutputPath;
+		/** Solo los cruces (con el giro tras cada uno), sin casos ni recorrido ni perfilador: informe en CrossOutputPath. */
+		bool bCrossOnly = false;
+		/** Ruta absoluta del informe de bCrossOnly. */
+		FString CrossOutputPath;
 	};
 
 	FLiminalBenchRun(UWorld* InWorld, const FConfig& InConfig);
@@ -108,6 +112,7 @@ private:
 	int32 PredictVisible(const FCase& Case) const;
 	void BeginWalk();
 	void UpdateWalk();
+	void BeginCrossing();
 	void UpdateCrossing(float DeltaTime);
 
 	void SetPortalsEnabled(bool bEnabled) const;
@@ -117,6 +122,7 @@ private:
 	TSharedRef<FJsonObject> PerPortalToJson() const;
 	bool WriteReport(const FString& Error) const;
 	bool WriteProfileReport(const FString& Error) const;
+	bool WriteCrossReport(const FString& Error) const;
 
 	FConfig Config;
 	TWeakObjectPtr<UWorld> World;

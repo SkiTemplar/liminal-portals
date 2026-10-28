@@ -14,7 +14,10 @@ class UWorld;
  * StartDistance del plano mirándola, espera HoldSeconds (los portales del bioma liberan su estado de
  * render, D-31, como en una partida normal), camina hasta cruzar y guarda el tiempo de fotograma,
  * de GPU, de render thread y de game thread de los WindowBefore fotogramas anteriores al cruce y los
- * WindowAfter siguientes: los picos al entrar en el bioma. Después devuelve al jugador al hub.
+ * WindowAfter siguientes: los picos al entrar en el bioma. Después se da la vuelta (TurnDegrees en TurnFrames
+ * fotogramas, sin andar) hacia la puerta de vuelta del bioma y guarda TurnWindow fotogramas desde el inicio del
+ * giro, con el estado de render que tenía esa puerta justo antes: el tirón al mirar atrás. Luego devuelve al
+ * jugador al hub.
  */
 class FLiminalBenchCrossing
 {
@@ -27,6 +30,10 @@ public:
 	static constexpr int32 MaxWalkFrames = 600;
 	/** Pasadas por todas las puertas. */
 	static constexpr int32 Passes = 2;
+	/** Giro tras cruzar: grados de yaw, fotogramas que dura y fotogramas que se guardan desde su inicio. */
+	static constexpr double TurnDegrees = 180.0;
+	static constexpr int32 TurnFrames = 20;
+	static constexpr int32 TurnWindow = 60;
 
 	void Begin(UWorld* World, const FTransform& HubTransform);
 	bool IsFinished() const { return bFinished; }
@@ -46,6 +53,7 @@ private:
 		Hold,
 		Walk,
 		After,
+		Turn,
 	};
 
 	struct FFrame
@@ -65,9 +73,22 @@ private:
 		TArray<FFrame> Frames;
 		/** Muestras de GPU llegadas durante la ventana (llegan con unos fotogramas de retraso). */
 		TArray<double> GpuMs;
+		/** Puerta de vuelta del bioma (la enlazada con la del hub) y si tenía estado de render al cruzar y al empezar a girar. */
+		FString ReturnPortal;
+		bool bReturnHadStateAtCross = false;
+		bool bReturnHadStateBeforeTurn = false;
+		/** Fotograma del giro en que la puerta de vuelta recupera el estado de render (INDEX_NONE si no lo hace). */
+		int32 ReturnStateFrame = INDEX_NONE;
+		/** Fotogramas desde el inicio del giro (índice 0: el primero con la rotación nueva aplicada). */
+		TArray<FFrame> TurnFrames;
+		/** Muestras de GPU llegadas durante el giro (las primeras pueden ser aún de la caminata). */
+		TArray<double> TurnGpuMs;
 	};
 
 	void NextDoor();
+	void BeginTurn(APlayerController& Controller, const ALiminalPortal& Portal);
+	void TickTurn(const FFrame& Frame, APlayerController& Controller, const ALiminalPortal& Portal);
+	static TSharedRef<FJsonObject> TurnToJson(const FDoor& Door);
 
 	TArray<TWeakObjectPtr<ALiminalPortal>> Doors;
 	TArray<FDoor> Results;
@@ -77,7 +98,9 @@ private:
 	int32 StepFrames = 0;
 	double HoldStart = 0.0;
 	int32 TeleportsBefore = 0;
+	double TurnStartYaw = 0.0;
 	bool bRecordingGpu = false;
+	bool bRecordingTurnGpu = false;
 	bool bFinished = true;
 	FString Error;
 };
