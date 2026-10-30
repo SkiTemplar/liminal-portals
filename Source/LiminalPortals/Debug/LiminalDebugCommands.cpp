@@ -3,6 +3,7 @@
 #include "Debug/LiminalBench.h"
 #include "Debug/LiminalCalibration.h"
 #include "Debug/LiminalSelfTest.h"
+#include "Debug/LiminalFilm.h"
 #include "Debug/LiminalTour.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -26,6 +27,7 @@ namespace
 	TUniquePtr<FLiminalCalibrationRun> GCalibrationRun;
 	TUniquePtr<FLiminalSelfTestRun> GSelfTestRun;
 	TUniquePtr<FLiminalTourRun> GTourRun;
+	TUniquePtr<FLiminalFilmRun> GFilmRun;
 	TUniquePtr<FLiminalBenchRun> GBenchRun;
 
 	constexpr int32 MaxSelfTestCycles = 1000;
@@ -120,7 +122,26 @@ namespace
 		}
 	}
 
-	void RunBenchCommand(const TArray<FString>& Args, UWorld* World)
+	void RunFilmCommand(const TArray<FString>& Args, UWorld* World)
+	{
+		// «*» o sin argumento: todos los planos.
+		const FString Filter = (Args.IsEmpty() || Args[0] == TEXT("*")) ? FString() : Args[0];
+		int32 CaptureEvery = FLiminalFilmRun::FConfig().CaptureEvery;
+		if (Args.Num() >= 2 && (!LexTryParseString(CaptureEvery, *Args[1]) || CaptureEvery < 1))
+		{
+			FailCommandStart(TEXT("Liminal.Film"), TEXT("uso Liminal.Film [Filtro|*] [UnoDeCada >= 1]"), IsInProgress(GFilmRun));
+			return;
+		}
+		FString Error;
+		const bool bInProgress = IsInProgress(GFilmRun);
+		if (!LiminalDebugCommands::StartFilm(World, Filter, CaptureEvery, Error))
+		{
+			FailCommandStart(TEXT("Liminal.Film"), Error, bInProgress);
+		}
+	}
+
+	void RunBenchCommand(
+const TArray<FString>& Args, UWorld* World)
 	{
 		const FLiminalBenchRun::FConfig Defaults;
 		int32 MeasureFrames = Defaults.MeasureFrames;
@@ -163,6 +184,13 @@ namespace
 		TEXT("Liminal.Tour"),
 		TEXT("Capturas del hub y de cada puerta (desde el hub y desde el bioma) en Saved/Tour/ y sale."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunTourCommand));
+
+	FAutoConsoleCommandWithWorldAndArgs FilmCommand(
+		TEXT("Liminal.Film"),
+		TEXT("Rueda los planos del vídeo del proyecto (recorrido de cámara determinista con cruces reales) y guarda ")
+		TEXT("los fotogramas en Saved/Film/<Plano>/ con el índice Saved/Film/film.json; después sale. ")
+		TEXT("Uso: Liminal.Film [Filtro|*] [UnoDeCada >= 1]"),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFilmCommand));
 
 	FAutoConsoleCommandWithWorldAndArgs CalibrateCommand(
 		TEXT("Liminal.Calibrate"),
@@ -286,7 +314,37 @@ namespace LiminalDebugCommands
 		return true;
 	}
 
-	bool StartBench(UWorld* World, int32 MeasureFrames, int32 WarmupFrames, bool bProfile, FString& OutError, bool bCrossOnly)
+	bool StartFilm(UWorld* World, const FString& ShotFilter, int32 CaptureEvery, FString& OutError)
+	{
+		if (GFilmRun && !GFilmRun->IsFinished())
+		{
+			OutError = TEXT("ya hay un rodaje en curso");
+			return false;
+		}
+		UWorld* GameWorld = ResolveGameWorld(World);
+		if (!GameWorld)
+		{
+			OutError = TEXT("no hay mundo de juego");
+			return false;
+		}
+
+		FLiminalFilmRun::FConfig Config;
+		Config.OutputDir = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Film")));
+		Config.ShotFilter = ShotFilter;
+		Config.CaptureEvery = CaptureEvery;
+
+		GFilmRun.Reset();
+		TUniquePtr<FLiminalFilmRun> Run = MakeUnique<FLiminalFilmRun>(GameWorld, Config);
+		if (!Run->Start(OutError))
+		{
+			return false;
+		}
+		GFilmRun = MoveTemp(Run);
+		return true;
+	}
+
+	bool StartBench(UWorld* World, int32 MeasureFrames
+, int32 WarmupFrames, bool bProfile, FString& OutError, bool bCrossOnly)
 	{
 		if (GBenchRun && !GBenchRun->IsFinished())
 		{

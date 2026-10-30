@@ -36,6 +36,12 @@ namespace LiminalDebugCommands
 	/** Liminal.Tour: capturas del hub y de cada puerta en Saved/Tour/. */
 	LIMINALPORTALS_API bool StartTour(UWorld* World, FString& OutError);
 
+	/**
+	 * Liminal.Film [Filtro|*] [UnoDeCada]: planos del vídeo en Saved/Film/<Plano>/ e índice Saved/Film/film.json.
+	 * @return false (con el motivo en OutError) si no hay mundo de juego o ya hay un rodaje en curso.
+	 */
+	LIMINALPORTALS_API bool StartFilm(UWorld* World, const FString& ShotFilter, int32 CaptureEvery, FString& OutError);
+
 	/** Comprueba la etiqueta de salida de Liminal.Calibrate (vacía = válida). */
 	LIMINALPORTALS_API bool IsValidOutputTag(const FString& Tag);
 }
