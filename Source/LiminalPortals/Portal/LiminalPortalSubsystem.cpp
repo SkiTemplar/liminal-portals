@@ -1,5 +1,6 @@
 #include "Portal/LiminalPortalSubsystem.h"
 
+#include "ContentStreaming.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
@@ -50,7 +51,21 @@ namespace
 		TEXT("(100 m: más que el hub, mucho menos que los 20 km entre mundos)."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<float> CVarPrewarmDistance(
+		TEXT("Liminal.Portal.PrewarmDistance"),
+		400.f,
+		TEXT("Tirón al cruzar (D-37): distancia en cm de la cámara al centro de una puerta, por delante de ella, a la ")
+		TEXT("que la escena de Lumen de la vista principal empieza a preparar el destino (0 = sin precalentar)."),
+		ECVF_Default);
+
 	constexpr int32 MaxLagFrames = 4;
+	/** Distancia por delante del portal de destino del origen de precalentamiento (cámara tras cruzar andando). */
+	constexpr double PrewarmExitDepth = 150.0;
+	/**
+	 * Vida del origen en el streaming. Con duración > 0 entra en LastingViewInfos, que el streaming pone antes
+	 * que la vista del jugador: Lumen solo admite LUMEN_MAX_VIEWS = 2 orígenes (la vista y uno más).
+	 */
+	constexpr float PrewarmOriginSeconds = 0.5f;
 }
 
 void ULiminalPortalSubsystem::RegisterPortal(ALiminalPortal* Portal)
@@ -107,6 +122,7 @@ void ULiminalPortalSubsystem::UpdatePortals(APlayerController* PlayerController,
 
 	CaptureVisiblePortals(PlayerController, FinalView);
 	ReleaseIdleCaptureStates(FinalView.Location);
+	PrewarmNearestDestination(FinalView.Location);
 	PushViewHistory(FinalView);
 	OnPortalsUpdated.Broadcast(FinalView);
 }
@@ -263,4 +279,39 @@ void ULiminalPortalSubsystem::ReleaseIdleCaptureStates(const FVector& CameraLoca
 			Portal->ReleaseCaptureStateIfIdle(Now, CameraLocation, IdleSeconds, ReleaseDistance);
 		}
 	}
+}
+
+void ULiminalPortalSubsystem::PrewarmNearestDestination(const FVector& CameraLocation)
+{
+	LastPrewarmPortal.Reset();
+	const double PrewarmDistance = CVarPrewarmDistance.GetValueOnGameThread();
+	const ALiminalPortal* Nearest = nullptr;
+	double NearestDistance = TNumericLimits<double>::Max();
+	for (const TWeakObjectPtr<ALiminalPortal>& Entry : Portals)
+	{
+		const ALiminalPortal* Portal = Entry.Get();
+		if (!Portal || !Portal->LinkedPortal || Portal->bExitOnly)
+		{
+			continue;
+		}
+		const FTransform Plane = Portal->GetPlaneTransform();
+		const double Distance = FVector::Dist(CameraLocation, Plane.GetLocation());
+		const double SignedDistance = LiminalPortalMath::SignedDistanceToPlane(Plane, CameraLocation);
+		if (LiminalPortalMath::ShouldPrewarmDestination(SignedDistance, Distance, PrewarmDistance) && Distance < NearestDistance)
+		{
+			Nearest = Portal;
+			NearestDistance = Distance;
+		}
+	}
+	if (!Nearest)
+	{
+		return;
+	}
+
+	// La escena de Lumen de la vista principal prioriza las tarjetas de la caché de superficies por la distancia
+	// al origen más cercano, incluidos los orígenes de streaming (AddLumenStreamingViewOrigins): con el destino
+	// como segundo origen, las tarjetas del bioma se capturan durante el acercamiento y no todas al cruzar.
+	const FVector Origin = LiminalPortalMath::ComputePrewarmOrigin(Nearest->LinkedPortal->GetPlaneTransform(), PrewarmExitDepth);
+	IStreamingManager::Get().AddViewLocation(Origin, 1.f, false, PrewarmOriginSeconds);
+	LastPrewarmPortal = Nearest;
 }

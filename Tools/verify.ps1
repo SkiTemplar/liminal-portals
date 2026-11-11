@@ -288,10 +288,10 @@ function Invoke-BenchCross([string[]]$ExtraCommands) {
     Write-Host ("   {0}, viewport {1}x{2}" -f $data.gpu, $data.viewport[0], $data.viewport[1])
     foreach ($door in $data.crossings.doors) {
         $turn = $door.turn
-        Write-Host ("{0,-22} pasada {1}: cruce {2:N1} ms (mediana antes {3:N1}, x{4:N1}); giro {5:N1} ms en el fotograma {6} (mediana {7:N1}, x{8:N1}, RT {9:N1} ms); vuelta {10}: estado al cruzar {11}, antes de girar {12}, recuperado en {13}" -f `
+        Write-Host ("{0,-22} pasada {1}: cruce {2:N1} ms (mediana antes {3:N1}, x{4:N1}); giro {5:N1} ms en el fotograma {6} (mediana {7:N1}, x{8:N1}, RT {9:N1} ms); vuelta {10}: estado al cruzar {11}, antes de girar {12}, recuperado en {13}; precalentado {14} fotogramas" -f `
             $door.portal, $door.pass, $door.frameMsMaxFromCross, $door.frameMsMedianBefore, $door.spikeRatio, $turn.frameMsMax,
             $turn.frameMsMaxIndex, $turn.frameMsMedian, $turn.spikeRatio, $turn.renderThreadMsMax, $turn.returnPortal,
-            $turn.returnHadStateAtCross, $turn.returnHadStateBeforeTurn, $turn.returnStateFrame)
+            $turn.returnHadStateAtCross, $turn.returnHadStateBeforeTurn, $turn.returnStateFrame, $door.prewarmFrames)
     }
     if (-not $data.complete) { throw "Liminal.Bench cross incompleto: $($data.error) (log: $logPath)" }
 }

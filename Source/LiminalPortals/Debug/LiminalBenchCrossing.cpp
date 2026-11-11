@@ -125,6 +125,7 @@ void FLiminalBenchCrossing::Tick(float DeltaTime, APlayerController* Controller,
 	Frame.RenderThreadMs = FPlatformTime::ToMilliseconds(GRenderThreadTime);
 	Frame.GameThreadMs = FPlatformTime::ToMilliseconds(GGameThreadTime);
 	Frame.Captures = Subsystem.GetLastCaptureCount();
+	const bool bPrewarming = Subsystem.GetLastPrewarmPortal() == Portal;
 
 	switch (Step)
 	{
@@ -133,11 +134,13 @@ void FLiminalBenchCrossing::Tick(float DeltaTime, APlayerController* Controller,
 		const FVector Feet = PortalTransform.GetLocation() - Inward * StartDistance;
 		LiminalDebugWorld::PlacePlayer(Controller, Character, Feet, FRotator(0.0, Inward.Rotation().Yaw, 0.0));
 		HoldStart = FPlatformTime::Seconds();
+		PrewarmFrames = 0;
 		Step = EStep::Hold;
 		break;
 	}
 	case EStep::Hold:
 		History.Add(Frame);
+		PrewarmFrames += bPrewarming ? 1 : 0;
 		if (FPlatformTime::Seconds() - HoldStart >= HoldSeconds)
 		{
 			TeleportsBefore = Subsystem.GetTeleportCount();
@@ -152,6 +155,7 @@ void FLiminalBenchCrossing::Tick(float DeltaTime, APlayerController* Controller,
 		break;
 	case EStep::Walk:
 		History.Add(Frame);
+		PrewarmFrames += bPrewarming ? 1 : 0;
 		Character->AddMovementInput(Inward, 1.f);
 		if (Subsystem.GetTeleportCount() != TeleportsBefore)
 		{
@@ -159,6 +163,7 @@ void FLiminalBenchCrossing::Tick(float DeltaTime, APlayerController* Controller,
 			Door.bCrossed = true;
 			Door.ReturnPortal = Portal->LinkedPortal ? Portal->LinkedPortal->GetName() : FString();
 			Door.bReturnHadStateAtCross = LiminalBenchCrossingDetail::HasReturnState(*Portal);
+			Door.PrewarmFrames = PrewarmFrames;
 			const int32 First = FMath::Max(History.Num() - WindowBefore - 1, 0);
 			Door.Frames.Append(&History[First], History.Num() - First);
 			Step = EStep::After;
@@ -301,6 +306,7 @@ TSharedRef<FJsonObject> FLiminalBenchCrossing::ToJson() const
 		Entry->SetStringField(TEXT("portal"), Door.Portal);
 		Entry->SetNumberField(TEXT("pass"), Door.Pass);
 		Entry->SetBoolField(TEXT("crossed"), Door.bCrossed);
+		Entry->SetNumberField(TEXT("prewarmFrames"), Door.PrewarmFrames);
 		Entry->SetNumberField(TEXT("crossIndex"), CrossIndex);
 		Entry->SetNumberField(TEXT("frameMsMedianBefore"), MedianBefore);
 		Entry->SetNumberField(TEXT("frameMsMaxFromCross"), MaxAfter);

@@ -204,6 +204,7 @@ informes de ejecuciones anteriores.
 | `-SelfTest -SelfTestNegative` | Añade el control negativo `Liminal.Portal.DebugVelocityScale 0.97` | La prueba tiene que fallar en las cuatro puertas |
 | `-Tour` | `L_Hub` con `Liminal.Tour`: 13 capturas (hub y, por puerta, desde el hub, desde el bioma y desde dentro) en `Saved/Tour/` | `check_tour.py`: luminancia media entre 15 y 245, desviación > 6, hueco del portal distinto del marco (> 20) y con detalle (> 4), pared de vuelta iluminada (≥ 150) y primer plano no negro (≤ 25 % de píxeles < 20). `Saved/Tour/result.json` y `lamina.png` |
 | `-Bench` | `L_Hub` a 1920 × 1080 en ventana, `r.VSync 0`, `t.MaxFPS 0`, dos ejecuciones de `Liminal.Bench` | Tiempo de GPU, render thread y game thread en cinco poses fijas (0, 1, 2, 4 portales y 4 apagados), 120 fotogramas de calentamiento y 240 medidos; falla si algún caso no tiene las capturas esperadas y avisa si el coste por portal difiere un 25 % o más. `Saved/Bench_run{1,2}.json`, `Saved/BenchResult.json` |
+| `-BenchCross` | Solo los cruces de `-Bench -Profile` (dos pasadas por las cuatro puertas) y un giro de 180° tras cada uno hacia la puerta de vuelta, sin casos ni perfilador | Por cruce: pico frente a la mediana previa, fotogramas con el destino precalentado (D-37) y, en el giro, pico y estado de render de la puerta de vuelta (D-31). `Saved/BenchCross.json` |
 | `-Bench -Profile` | Lo mismo con `Liminal.Bench … profile` (D-36) y, tras los casos, un recorrido de 216 poses por el hub | Desglose de GPU por pase y por cola de cada caso, con la vista principal separada de cada captura (`Tools/Verify/summarize_profile.py` lo agrupa en Lumen, sombras, base pass, TSR…), CPU (game, render y RHI thread) y, en el recorrido, capturas por fotograma, superficies dibujadas en la vista principal y área en pantalla de cada portal capturado. `Saved/BenchProfile_run<N>.json`, `Saved/BenchProfileSummary.json` |
 
 Parámetros comunes: `-ExecCmds '...'` (órdenes de consola previas), `-ResX`/`-ResY` (1280 × 720),
@@ -224,6 +225,7 @@ Parámetros comunes: `-ExecCmds '...'` (órdenes de consola previas), `-ResX`/`-
 | `Liminal.Portal.CaptureGIMethod` | Iluminación global de las capturas (−1 = la del proyecto, 0 = ninguna, 2 = en pantalla; D-36) |
 | `Liminal.Portal.CaptureShowFlags` | Show flags de las capturas, `Nombre=0+Nombre=1` (con `+`: `-ExecCmds` parte por comas; D-36) |
 | `Liminal.Scatter.CullScale` | Escala de las distancias de corte de la dispersión (1; las categorías sin corte no cambian; D-36) |
+| `Liminal.Portal.PrewarmDistance` | Distancia a la puerta (cm, por delante) a la que Lumen empieza a preparar el destino antes de cruzar (400; 0 lo desactiva; D-37) |
 
 ## Medidas
 
@@ -356,6 +358,9 @@ Cruces (dos pasadas por las cuatro puertas, 12 s de espera antes de cada una): e
 ~640 ms en un fotograma; los demás, 51-61 ms frente a una mediana de 17-20 ms (×2,9-3,5), un solo fotograma, en
 el render thread; la GPU no pasa de 27 ms. Es Lumen: con `r.DynamicGlobalIlluminationMethod 0` y reflejos en
 pantalla no hay pico (máximo ×1,1-1,5, también en el primer cruce); con sombras en cascada empeora (76-100 ms).
+Medidas sin el precalentamiento de D-37 (`Liminal.Portal.PrewarmDistance`), que está implementado pero **sin medir**:
+en `-BenchCross` la espera de 12 s a 2,5 m de la puerta cae dentro de los 4 m, así que es el caso favorable; el
+realista es `-ExecCmds 'Liminal.Portal.PrewarmDistance 240'` (solo durante la caminata, ~0,6 s) frente a `0`.
 
 CPU: a resolución normal manda la GPU (fotograma = GPU + 0,5-2,5 ms; game thread 1,3-2,5 ms). Con la GPU casi
 descargada (`r.ScreenPercentage 26`, `CaptureScale 0.1`) el fotograma pasa a ser del render thread: 10,3 / 15,2 /

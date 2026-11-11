@@ -660,3 +660,29 @@ Las que surjan durante la implementación se añaden aquí con este formato:
   `stat gpu` (agrega todas las vistas, no separa capturas); Unreal Insights (manual).
 - **Cómo revertir**: `Debug/LiminalGpuProfile.*`, `Debug/LiminalBenchWalk.*`, `Debug/LiminalBenchCrossing.*`, la fase
   `Walk`/`Cross` de `Debug/LiminalBench.cpp`, `-Profile` en `Tools/verify.ps1`.
+
+### D-37 · Precalentar la escena de Lumen del destino antes de cruzar
+
+- **Contexto**: cada cruce da un fotograma de 51-61 ms en el render thread (×3 la mediana) y el primero del
+  proceso ~640 ms; sin la GI de Lumen desaparece (D-36). Hipótesis, sin confirmar con Insights: al teletransportarse,
+  la escena de Lumen de la vista principal tiene que capturar de golpe las tarjetas de la caché de superficies del
+  bioma, que estaban fuera de su distancia.
+- **Elegida**: con la cámara por delante de una puerta a `Liminal.Portal.PrewarmDistance` (400 cm) o menos de su
+  centro, `ULiminalPortalSubsystem::PrewarmNearestDestination` pasa al streaming
+  (`IStreamingManager::AddViewLocation`) un origen fijo 150 cm por delante del portal de destino, donde queda la
+  cámara al cruzar. UE 5.6 añade los orígenes de streaming a los de la escena de Lumen
+  (`AddLumenStreamingViewOrigins`, `LumenSceneRendering.cpp`) y prioriza las tarjetas por la distancia al origen
+  más cercano, así que las del bioma se capturan durante el acercamiento con el presupuesto normal por fotograma.
+  Solo la puerta más cercana: Lumen admite `LUMEN_MAX_VIEWS = 2` orígenes (la vista y uno más). El origen lleva
+  duración (0,5 s, renovada cada fotograma) para entrar en `LastingViewInfos`, que van antes que la vista del
+  jugador; sin duración, el origen de streaming del jugador (que no coincide con el de Lumen, desplazado por la
+  velocidad de la cámara) ocupa el segundo hueco y el del destino se descarta. Matemática pura con test
+  (`ShouldPrewarmDestination`, `ComputePrewarmOrigin`); `Liminal.Bench … cross` anota `prewarmFrames` por cruce.
+- **Riesgos sin medir**: la caché del hub comparte atlas con la del destino mientras dura el acercamiento; las
+  capturas de portal con escena de Lumen propia también reciben el origen (las de otros biomas lo tienen lejos);
+  el streaming de texturas también lo usa (boost 1). Si el pico es de otra parte de Lumen (campos de distancia
+  globales, caché de radiancia), no cambia; el primer cruce puede ser compilación de shaders y solo se adelantaría.
+- **Alternativas**: limitar con CVars las capturas de tarjetas por fotograma (reparte el coste, la luz del bioma
+  tarda en asentarse); renderizar una vista oculta en el destino (más código y GPU durante el acercamiento).
+- **Cómo revertir**: `Liminal.Portal.PrewarmDistance 0`; el código en `Portal/LiminalPortalSubsystem.cpp`.
+

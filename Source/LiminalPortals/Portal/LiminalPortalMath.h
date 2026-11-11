@@ -94,4 +94,18 @@ namespace LiminalPortalMath
 	 */
 	LIMINALPORTALS_API bool ShouldReleaseCaptureState(double SecondsSinceLastCapture, double DistanceToCamera,
 		double IdleSeconds, double ReleaseDistance);
+
+	/**
+	 * Precalentamiento de Lumen antes de un cruce (D-37): la cámara está por delante del plano del portal
+	 * (SignedDistance > 0) y a PrewarmDistance o menos de su centro. PrewarmDistance <= 0 lo desactiva; las
+	 * entradas no finitas no precalientan.
+	 */
+	LIMINALPORTALS_API bool ShouldPrewarmDestination(double SignedDistance, double DistanceToCenter, double PrewarmDistance);
+
+	/**
+	 * Origen extra de la escena de Lumen de la vista principal para precalentar un cruce (D-37): ExitDepth
+	 * por delante del centro del portal de destino, donde queda la cámara al cruzar. Es fijo por portal para
+	 * que el streaming lo reconozca como la misma vista de un fotograma a otro.
+	 */
+	LIMINALPORTALS_API FVector ComputePrewarmOrigin(const FTransform& TargetPortal, double ExitDepth);
 }

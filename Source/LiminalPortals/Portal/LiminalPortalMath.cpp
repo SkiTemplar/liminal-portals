@@ -180,4 +180,20 @@ namespace LiminalPortalMath
 		}
 		return SecondsSinceLastCapture >= IdleSeconds && DistanceToCamera >= FMath::Max(ReleaseDistance, 0.0);
 	}
+
+	bool ShouldPrewarmDestination(double SignedDistance, double DistanceToCenter, double PrewarmDistance)
+	{
+		const bool bValidInput = FMath::IsFinite(SignedDistance) && FMath::IsFinite(DistanceToCenter)
+			&& FMath::IsFinite(PrewarmDistance);
+		if (!bValidInput || !(PrewarmDistance > 0.0))
+		{
+			return false;
+		}
+		return SignedDistance > 0.0 && DistanceToCenter <= PrewarmDistance;
+	}
+
+	FVector ComputePrewarmOrigin(const FTransform& TargetPortal, double ExitDepth)
+	{
+		return MakeRigid(TargetPortal).TransformPosition(FVector(ExitDepth, 0.0, 0.0));
+	}
 }

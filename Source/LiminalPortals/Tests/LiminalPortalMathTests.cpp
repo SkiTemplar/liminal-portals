@@ -337,3 +337,37 @@ bool FLiminalCaptureStateReleaseTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Distancia NaN ⇒ conserva"), ShouldReleaseCaptureState(600.0, std::numeric_limits<double>::quiet_NaN(), 10.0, 10000.0));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPrewarmDecisionTest, "LiminalPortals.Math.Prewarm.ShouldPrewarm", PortalMathTestFlags)
+bool FLiminalPrewarmDecisionTest::RunTest(const FString& Parameters)
+{
+	// Cámara a 2,5 m por delante de la puerta (como en Liminal.Bench cross), con umbral de 4 m: se precalienta.
+	TestTrue(TEXT("Delante y cerca ⇒ precalienta"), ShouldPrewarmDestination(250.0, 260.0, 400.0));
+	TestTrue(TEXT("Justo en el umbral ⇒ precalienta"), ShouldPrewarmDestination(400.0, 400.0, 400.0));
+
+	// Negativos: detrás del plano, lejos (la otra pared del hub), desactivado o entradas no válidas.
+	TestFalse(TEXT("Detrás del plano ⇒ no"), ShouldPrewarmDestination(-10.0, 50.0, 400.0));
+	TestFalse(TEXT("Sobre el plano ⇒ no"), ShouldPrewarmDestination(0.0, 50.0, 400.0));
+	TestFalse(TEXT("Lejos ⇒ no"), ShouldPrewarmDestination(580.0, 600.0, 400.0));
+	TestFalse(TEXT("PrewarmDistance 0 ⇒ desactivado"), ShouldPrewarmDestination(100.0, 100.0, 0.0));
+	TestFalse(TEXT("Distancia NaN ⇒ no"), ShouldPrewarmDestination(100.0, std::numeric_limits<double>::quiet_NaN(), 400.0));
+	TestFalse(TEXT("Umbral infinito ⇒ no"), ShouldPrewarmDestination(100.0, 100.0, std::numeric_limits<double>::infinity()));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLiminalPrewarmOriginTest, "LiminalPortals.Math.Prewarm.Origin", PortalMathTestFlags)
+bool FLiminalPrewarmOriginTest::RunTest(const FString& Parameters)
+{
+	// El origen es donde queda la cámara tras cruzar: el punto ExitDepth por detrás del centro de A pasa a B.
+	const double ExitDepth = 150.0;
+	const FVector Origin = ComputePrewarmOrigin(FixturePortalB, ExitDepth);
+	const FVector AfterCrossing = TransferPoint(MakeTransfer(FixturePortalA, FixturePortalB), FVector(-ExitDepth, 0.0, 0.0));
+	TestTrue(TEXT("Coincide con el punto tras el cruce"), Origin.Equals(AfterCrossing, PositionTolerance));
+	TestTrue(TEXT("Por delante del plano de B"), FMath::IsNearlyEqual(SignedDistanceToPlane(FixturePortalB, Origin), ExitDepth, PositionTolerance));
+
+	// Negativo: no está detrás de B ni en el portal de origen.
+	const FVector Behind = FixturePortalB.TransformPosition(FVector(-ExitDepth, 0.0, 0.0));
+	TestFalse(TEXT("No es el punto de detrás de B"), Origin.Equals(Behind, 1.0));
+	TestTrue(TEXT("Está en el bioma, no en el hub"), FVector::Dist(Origin, FixturePortalA.GetLocation()) > 10000.0);
+	return true;
+}

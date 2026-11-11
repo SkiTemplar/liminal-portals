@@ -69,6 +69,8 @@ private:
 		FString Portal;
 		int32 Pass = 1;
 		bool bCrossed = false;
+		/** Fotogramas de espera y caminata con el destino de esta puerta precalentado en Lumen (D-37). */
+		int32 PrewarmFrames = 0;
 		/** Fotogramas de la ventana; el del cruce es el índice WindowBefore. */
 		TArray<FFrame> Frames;
 		/** Muestras de GPU llegadas durante la ventana (llegan con unos fotogramas de retraso). */
@@ -99,6 +101,7 @@ private:
 	double HoldStart = 0.0;
 	int32 TeleportsBefore = 0;
 	double TurnStartYaw = 0.0;
+	int32 PrewarmFrames = 0;
 	bool bRecordingGpu = false;
 	bool bRecordingTurnGpu = false;
 	bool bFinished = true;

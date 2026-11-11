@@ -63,6 +63,9 @@ public:
 	/** Tamaño del render target de las capturas del último fotograma que capturó algo ((0, 0) si ninguno). */
 	FIntPoint GetLastCaptureSize() const { return LastCaptureSize; }
 
+	/** Portal cuyo destino se precalentó en el último fotograma (nulo si ninguno, D-37). */
+	const ALiminalPortal* GetLastPrewarmPortal() const { return LastPrewarmPortal.Get(); }
+
 	/** Teletransportes desde que empezó el mundo. */
 	UFUNCTION(BlueprintPure, Category = "Liminal|Portals")
 	int32 GetTeleportCount() const { return TeleportCount; }
@@ -85,6 +88,8 @@ private:
 	void CaptureVisiblePortals(APlayerController* PlayerController, const FMinimalViewInfo& View);
 	/** Libera el estado de render de los portales lejanos que llevan tiempo sin capturar (D-31). */
 	void ReleaseIdleCaptureStates(const FVector& CameraLocation);
+	/** Da a Lumen como origen extra el destino de la puerta más cercana a la que se acerca la cámara (D-37). */
+	void PrewarmNearestDestination(const FVector& CameraLocation);
 	const FMinimalViewInfo& SelectCaptureView(const FMinimalViewInfo& View);
 	void PushViewHistory(const FMinimalViewInfo& View);
 
@@ -98,4 +103,5 @@ private:
 	int32 LastCaptureCount = 0;
 	FIntPoint LastCaptureSize = FIntPoint::ZeroValue;
 	int32 TeleportCount = 0;
+	TWeakObjectPtr<const ALiminalPortal> LastPrewarmPortal;
 };
