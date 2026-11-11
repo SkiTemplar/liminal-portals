@@ -30,3 +30,7 @@ Art/Export/
 .pytest_cache/
 .ruff_cache/
 .coverage
+.claude/skills/brag-slim
+.claude/skills/ue5-dev
+.claude/skills/cpp-coding-standards
+.claude/skills/cpp-testing
