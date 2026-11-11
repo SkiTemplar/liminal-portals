@@ -34,3 +34,6 @@ Art/Export/
 .claude/skills/ue5-dev
 .claude/skills/cpp-coding-standards
 .claude/skills/cpp-testing
+
+# Configuracion local de Unreal con valores propios de la maquina (token del Android File Server)
+Config/User*.ini
